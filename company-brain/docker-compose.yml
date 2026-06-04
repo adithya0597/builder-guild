@@ -1,0 +1,27 @@
+# Company-brain agent-KB — Neo4j substrate (beads cb-6a1.1 / LAYER1_TODO A1)
+# Neo4j 5.26 Community LTS: range + fulltext + vector indexes are all native (vector GA since 5.15).
+# Volume-persisted via named volumes (survive container restart). Bolt 7687, HTTP 7474.
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: cb-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt (neo4j-graphrag-python client → A2)
+    volumes:
+      - cb_neo4j_data:/data
+      - cb_neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-companybrain}          # local dev only — not a secret
+      # Neo4j env->config mapping: dot->_, literal _-> __. Defaults are fine for local dev;
+      # memory tuning omitted (server.memory.pagecache.size etc. are easy to mis-map and trip strict validation).
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-companybrain} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+volumes:
+  cb_neo4j_data:
+  cb_neo4j_logs:

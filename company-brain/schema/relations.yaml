@@ -1,0 +1,186 @@
+# relations.yaml — B2-rules (cb-6a1.4). The per-relation rule contract the MATCH
+# mutation engine (E1-mut) reads to pick parameterized Cypher.
+# S7 RESOLUTION LOCKED 2026-06-03 (ONTOLOGY_SCHEMA §10): the {cardinality,temporal,
+# contradiction} trichotomy is superseded by a 5-axis descriptor. Field names below are
+# the locked forward contract for the deferred E1-mut engine — values document intent;
+# nothing executes yet (the 15-relation spine stays $0-deterministic as-is).
+#   arity:           1 | N | inf            (split out of old `cardinality`: how many objects)
+#   overflow_policy: evict | reject | coexist | aggregate   (DEFAULT reject — the engine must
+#                    never guess which incumbent to supersede; functional edge = arity:1+evict)
+#   verbs:           add | add+remove       (accumulate-only vs also retract)
+#   temporal:        static | bi-temporal | windowed   (windowed = closed [valid_at,invalid_at])
+#   contradiction:   {collision_key: slot|window|set|path,
+#                     resolution: structural | numeric | graph_invariant | semantic}
+#                    numeric carries a typed `comparator` (gt|lt|range_overlap) — NOT a new family
+#   set_snapshot:    true   (set-valued only; reconciliation = toAdd/toRemove diff)
+# Legacy mapping (pre-S7, retained for reader orientation):
+#   cardinality:functional == arity:1 ; cardinality:additive == arity:N|inf
+#   contradiction:structural|semantic|na == resolution axis below
+relations:
+  ASSIGNED_TO:
+    from: [Issue, Task]
+    to: [Agent]
+    cardinality: functional        # legacy; == arity:1 + overflow:evict
+    arity: 1
+    overflow_policy: evict          # functional supersede: one current assignee, new evicts old
+    verbs: add+remove
+    temporal: bi-temporal
+    contradiction: {collision_key: slot, resolution: structural}
+
+  HAS_STATUS:
+    from: [Issue, Task]
+    to: [StatusValue]
+    cardinality: functional
+    arity: 1
+    overflow_policy: evict
+    verbs: add+remove
+    temporal: bi-temporal
+    contradiction: {collision_key: slot, resolution: structural}
+
+  HAS_PRIORITY:
+    from: [Issue, Task]
+    to: [PriorityValue]
+    cardinality: functional
+    arity: 1
+    overflow_policy: evict
+    verbs: add+remove
+    temporal: bi-temporal
+    contradiction: {collision_key: slot, resolution: structural}
+
+  BLOCKS:
+    from: [Issue]
+    to: [Issue]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject         # no eviction: a block is added or removed explicitly
+    verbs: add+remove
+    temporal: bi-temporal
+    contradiction: {collision_key: slot, resolution: structural}
+
+  DEPENDS_ON:
+    from: [Task]
+    to: [Task]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add+remove
+    temporal: bi-temporal
+    # dependency graph must stay acyclic -> path collision-key catches cycle contradictions
+    contradiction: {collision_key: path, resolution: graph_invariant}
+
+  PART_OF:
+    from: [Issue, Task, Repo]
+    to: [Project]
+    cardinality: functional
+    arity: 1
+    overflow_policy: reject         # re-parenting is not a silent supersede; reject collision
+    verbs: add+remove
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  OWNS:
+    from: [Agent]
+    to: [Project, Repo]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add+remove
+    temporal: bi-temporal
+    set_snapshot: true              # ownership set reconciled as toAdd/toRemove diff
+    contradiction: {collision_key: set, resolution: structural}
+
+  IMPLEMENTS:
+    from: [Commit, Repo]
+    to: [Decision, Issue]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  AUTHORED:
+    from: [Agent]
+    to: [Commit]
+    cardinality: functional
+    arity: 1
+    overflow_policy: reject         # authorship is immutable historical record; never evict
+    verbs: add
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  DECIDED:
+    from: [Agent]
+    to: [Decision]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  VOTED_ON:
+    from: [Agent]
+    to: [Decision]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  SUPERSEDES:
+    from: [Decision]
+    to: [Decision]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add
+    temporal: static
+    # supersession chain must not form a cycle -> path/graph_invariant
+    contradiction: {collision_key: path, resolution: graph_invariant}
+
+  IN_SUBDOMAIN:
+    from: [Entity]
+    to: [SubDomain]
+    cardinality: functional
+    arity: 1
+    overflow_policy: evict          # roll-up re-anchor: one current subdomain, new evicts old
+    verbs: add+remove
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  IN_DOMAIN:
+    from: [SubDomain]
+    to: [Domain]
+    cardinality: functional
+    arity: 1
+    overflow_policy: evict
+    verbs: add+remove
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}
+
+  MENTIONS:
+    from: [Episodic]
+    to: [Entity]
+    cardinality: additive
+    arity: inf
+    overflow_policy: coexist        # provenance: every mention coexists, never collides
+    verbs: add
+    temporal: static
+    contradiction: {collision_key: slot, resolution: structural}   # was na (provenance); no semantic check
+
+  RELATED_TO:
+    from: [Entity]
+    to: [Entity]
+    cardinality: additive
+    arity: inf
+    overflow_policy: reject
+    verbs: add+remove
+    temporal: bi-temporal
+    contradiction: {collision_key: slot, resolution: semantic}     # free-text -> LLM
+# S7-tri (cb-6a1.9) open gap — RESOLVED 2026-06-03 (ONTOLOGY_SCHEMA §10): bounded-N, set-valued,
+# time-windowed, numeric/range now covered by the 5-axis descriptor above (arity N + overflow_policy,
+# verbs add+remove + set_snapshot, temporal:windowed, resolution:numeric+comparator respectively).
+# No numeric/range relation exists in the current 15-relation spine; when one is added, use
+# resolution:numeric with a typed comparator (gt|lt|range_overlap) rather than a new contradiction family.
