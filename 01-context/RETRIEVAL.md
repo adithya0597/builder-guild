@@ -57,7 +57,7 @@ The retrieval question for *memory across sessions*. Benchmark = **LOCOMO** ([24
 
 - **EmbeddingGemma-300M** (local, $0) — 308M params, 768-dim w/ Matryoshka truncation to 512/256/128; **1st among sub-500M** on MTEB-multilingual-v2, 8th overall ([2509.20354](https://arxiv.org/abs/2509.20354)). Right default for local/private retrieval.
 - **gemini-embedding-001** (hosted) — Mean-task 68.32, retrieval 67.71 on MTEB-multilingual; #1 at release ([2503.07891](https://arxiv.org/abs/2503.07891)). Use when quality > privacy/cost.
-- **nomic-embed-text-v1.5** — a solid local default (512-dim Matryoshka). Fine; the leverage is rerank + contextual chunking, not swapping this.
+- **nomic-embed-text-v1.5** — a common local default (512-dim Matryoshka). Fine; the leverage is rerank + contextual chunking, not swapping this.
 
 ## Evidence base + honesty
 
@@ -65,3 +65,4 @@ The retrieval question for *memory across sessions*. Benchmark = **LOCOMO** ([24
 **Corrections found (were wrong at abstract-level):** CRAG PopQA +7.0% → **+19.0%**; BRIGHT CoT 14.8→26.5 → **14.5→27.0**; GraphRAG comprehensiveness "72/57/64" → **72-83%** + diversity **62-82%** (not 57/60); PageIndex vector baseline "30-50%" → **19% shared-store** (see below). RCR-Router T=3 = single measured point, not a swept optimum.
 **Conditionals the levers carry:** rerank costs latency (BM25+CE ~450 ms GPU / 6100 ms CPU) and *loses* on out-of-distribution tasks (ArguAna, Touché) — "always rerank" needs a budget; contextual-chunking 49/67% is config-specific (Gemini embedder, 1−recall@20); Self-Route "cost" = input-tokens only (not wall-clock); **Power-of-Noise: random padding can *help* (+35%) while semantic hard-negatives *hurt* — so distractor-filtering must drop HIGH-similarity non-gold, not low-similarity random** (the naive "filter low-relevance" is backwards).
 - MTEB v1 vs v2 not comparable. Community signal = sentiment, direction only.
+- Companion: `MODEL_ROUTING.md`. Community raw: `~/Documents/Last30Days/rag-retrieval-failure-for-ai-agents-raw-v3.md`.

@@ -22,7 +22,7 @@ echo "OPENAI_API_KEY=sk-..." > .env    # LiteLLM → can point at Anthropic/loca
 - **Fit:** pilot it on our **long markdown design/architecture docs** (the natural PageIndex use case), NOT on code.
 
 ## Pilot eval design (minimal, runnable; mirrors FinanceBench methodology)
-1. **Corpus:** 1 representative long markdown doc, target **>50 sections** so tree-search matters (e.g. a concatenated architecture/runbook doc, or a merged design doc-set).
+1. **Corpus:** 1 representative long markdown doc, target **>50 sections** so tree-search matters (e.g. a concatenated architecture/runbook doc, or this `.hermes` doc-set merged).
 2. **Q&A set:** hand-write **15-20 pairs**, each tagged with the **gold section/heading** holding the answer. Mix: **8 single-section** lookups · **7 multi-section/synthesis** · **5 negative** ("not in doc" — must abstain).
 3. **Arms:**
    - **A = PageIndex** — `index(doc.md)` → agentic query; record selected `node_id`s + answer.
@@ -40,8 +40,8 @@ echo "OPENAI_API_KEY=sk-..." > .env    # LiteLLM → can point at Anthropic/loca
 - EmbeddingGemma-300M local for the baseline arm ($0).
 - ~1 long md doc + 15-20 hand-written Q&A (the only manual effort).
 
-## Cost at scale — do NOT run PageIndex over a whole projects folder
-Measured on a large projects tree (excluding node_modules/.venv/.git/site-packages/dist/build): **18,035 markdown files · 493 MB · 446,332 heading lines (≈sections)** + 22,089 code files (113,300 files total). PageIndex builds **one tree per doc**, so "over the folder" = 18,035 separate tree-builds.
+## Cost at scale — do NOT run PageIndex over the whole `~/Projects` folder
+Measured `~/Projects` (2026-06-01, excluding node_modules/.venv/.git/site-packages/dist/build): **18,035 markdown files · 493 MB · 446,332 heading lines (≈sections)** + 22,089 code files (113,300 files total). PageIndex builds **one tree per doc**, so "over the folder" = 18,035 separate tree-builds.
 
 **Computed build cost (LABELED-ESTIMATE; inputs: 493 MB → ÷4 ≈ 123M tokens; build reads the corpus ~1.3× for TOC+per-node summary; output ≈ #nodes × ~200 tok):**
 - **input** ≈ 123M × 1.3 (TOC + per-node summary read overhead — a rough fudge, validate in pilot) ≈ **160M tokens** → 160M × $2.5 = **$400**.
@@ -50,7 +50,7 @@ Measured on a large projects tree (excluding node_modules/.venv/.git/site-packag
 - @ Haiku 4.5 ($1/$5) ≈ **~$235**; @ local model via LiteLLM ≈ **$0 marginal but slow**.
 - **Latency is the real wall:** tens-of-thousands → ~446K LLM calls = **hours to days**, not minutes.
 
-**Verdict: never run it over the whole folder — it's expensive AND wrong.** The 18K md are mostly *vendored* library/framework docs (langchain-course, swarms, dependency docs), not your knowledge. Scope to **your authored long docs** (design docs, internal notes, project READMEs — hundreds, not 18K) → cost drops ~100×. And with surgical updates (HYBRID PART 3-C): a doc's tree is built **once** and rebuilt **only when that doc changes** (blast radius = 1 doc), so ongoing cost ≈ per-edit, not per-folder. The pilot above runs on **1** doc — that's the right unit.
+**Verdict: never run it over the whole folder — it's expensive AND wrong.** The 18K md are mostly *vendored* library/framework docs (langchain-course, swarms, dependency docs), not your knowledge. Scope to **your authored long docs** (your authored design docs and project READMEs — hundreds, not 18K) → cost drops ~100×. And with surgical updates (HYBRID PART 3-C): a doc's tree is built **once** and rebuilt **only when that doc changes** (blast radius = 1 doc), so ongoing cost ≈ per-edit, not per-folder. The pilot above runs on **1** doc — that's the right unit.
 
 ## Decision rule (what the pilot outputs)
 - **Pass** → PageIndex becomes method 3 on the ladder for long-doc nodes (`chunk_count` high / `long_context` is a structured doc). Wire it to fire only on that node class.

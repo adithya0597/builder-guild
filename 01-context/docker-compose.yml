@@ -13,11 +13,11 @@ services:
       - cb_neo4j_data:/data
       - cb_neo4j_logs:/logs
     environment:
-      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-companybrain}          # local dev only — not a secret
+      - NEO4J_AUTH=neo4j/companybrain          # local dev only — not a secret
       # Neo4j env->config mapping: dot->_, literal _-> __. Defaults are fine for local dev;
       # memory tuning omitted (server.memory.pagecache.size etc. are easy to mis-map and trip strict validation).
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-companybrain} 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p companybrain 'RETURN 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12

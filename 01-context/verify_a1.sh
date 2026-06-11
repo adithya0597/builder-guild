@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A1 (cb-6a1.1): stand up Neo4j Community + confirm range/fulltext/vector index types available.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(cd "$(dirname "$0")" && pwd)"
 echo "== recreate cb-neo4j with fixed config =="
 docker compose down --remove-orphans 2>&1 | tail -3
 docker compose up -d 2>&1 | tail -10

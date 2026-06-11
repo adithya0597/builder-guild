@@ -2,8 +2,13 @@
 # mutation engine (E1-mut) reads to pick parameterized Cypher.
 # S7 RESOLUTION LOCKED 2026-06-03 (ONTOLOGY_SCHEMA §10): the {cardinality,temporal,
 # contradiction} trichotomy is superseded by a 5-axis descriptor. Field names below are
-# the locked forward contract for the deferred E1-mut engine — values document intent;
-# nothing executes yet (the 15-relation spine stays $0-deterministic as-is).
+# the contract the E1-mut engine (company-brain/mutate.py) reads at runtime. As of 2026-06-05
+# the engine implements the 5 axis CATEGORIES for the VALUE-SET the current 15 relations use:
+# arity 1|inf, overflow evict|reject, verbs add|add+remove, temporal static|bi-temporal (recorded
+# + supersede_kind), contradiction structural|graph_invariant (cycle guard), set_snapshot diff.
+# NOT yet coded (no spine relation declares them): overflow:coexist|aggregate, temporal:windowed,
+# contradiction:numeric|semantic, bounded-N. Add when a relation first needs them. All edge
+# matches are namespace-scoped.
 #   arity:           1 | N | inf            (split out of old `cardinality`: how many objects)
 #   overflow_policy: evict | reject | coexist | aggregate   (DEFAULT reject — the engine must
 #                    never guess which incumbent to supersede; functional edge = arity:1+evict)

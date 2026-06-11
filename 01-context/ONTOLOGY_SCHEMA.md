@@ -80,7 +80,7 @@ DDL: `company-brain/schema/01_constraints.cypher`. Community-compatible `IS UNIQ
 - `:Episodic.uuid` UNIQUE — ingestion-unit identity.
 - Per T2 label: `.key` UNIQUE — the **canonical business key**, the deterministic `MERGE` target (PART 3-D "resolve a keyed entity → MERGE on canonical key").
 
-This makes structured ETL (D1) idempotent: re-ingesting the same Paperclip row `MERGE`s on `key`, never duplicates.
+This makes structured ETL (D1) idempotent: re-ingesting the same the tracker row `MERGE`s on `key`, never duplicates.
 
 ## §6 — Per-relation rule table (the mutation-engine contract)
 
@@ -128,11 +128,11 @@ The 4 "unfit" shapes (bounded-N, set-valued, time-windowed, numeric/range) do NO
 3. **LLM-as-classifier only** — runs in an isolated role with **no edge-write capability**, output is a typed enum (schema-validated), logged `(inputs, model, prompt_hash, confidence)`, confidence-gated → below threshold writes a `Conflict` node for human review (fails closed).
 4. Bounded-N resolution must be **order-independent** (total tie-break key); `reject` is the safe default.
 
-**Provenance:** resolved 2026-06-03 by a 3-lens panel (CTO/engineering — concrete Cypher templates + the `bounded`-subsumes-`functional` unification; CPO/data-model — the arity÷policy split + collision-is-local root cause + the 3 missed shapes; security — the smuggle test + the 4 guardrails). Run as Claude sub-agents ($0). The same question to the live Paperclip CTO agent **failed** (`adapter_failed: gpt-5.3-codex unsupported on a ChatGPT account`) — a model-auth misconfig, not a reasoning result. **Implementation of the 5-axis engine is a future task** (the current 15-relation spine stays $0-deterministic as-is).
+**Provenance:** resolved 2026-06-03 by a 3-lens panel (CTO/engineering — concrete Cypher templates + the `bounded`-subsumes-`functional` unification; CPO/data-model — the arity÷policy split + collision-is-local root cause + the 3 missed shapes; security — the smuggle test + the 4 guardrails). Run as Claude sub-agents ($0). The same question to the live the tracker CTO agent **failed** (`adapter_failed: gpt-5.3-codex unsupported on a ChatGPT account`) — a model-auth misconfig, not a reasoning result. **The 5-axis engine is implemented** in `company-brain/mutate.py` (2026-06-05, cb-dfv.4) for the **value-set the current 15 relations use**: arity 1|inf, overflow evict|reject, verbs add|add+remove, temporal static|bi-temporal (+`supersede_kind`), contradiction structural|graph_invariant (cycle guard), set_snapshot diff — namespace-scoped on every match, deterministic ($0, no LLM). **Declared-but-not-yet-coded** (no spine relation needs them): overflow `coexist`/`aggregate`, temporal `windowed`, contradiction `numeric`/`semantic`, bounded-N — add at first use. *Open:* numeric/range determinism settles when the first numeric relation lands.
 
-**Cross-validation (2026-06-03):** after fixing its model (`gpt-5.3-codex`→`gpt-5.4`), the live Paperclip **CTO agent independently converged** on the same resolution — keep the 3 axes, add deterministic policy fields (`capacity{maxCurrent,overflowPolicy}` / `collection.mode=set_snapshot` / `valueSemantics`+typed comparator / `temporal:windowed`), with **default `reject` on bounded-N overflow** ("the engine must never guess which incumbent to supersede" — matching the security lens verbatim). Two independent agent systems reaching the same architecture is strong validation. One divergence: the Paperclip CTO judged numeric **fully** deterministic via a typed comparator, vs the Claude panel's ~20% LLM-residue for ambiguous-from-text numeric — an open question to settle when implementing.
+**Cross-validation (2026-06-03):** after fixing its model (`gpt-5.3-codex`→`gpt-5.4`), the live the tracker **CTO agent independently converged** on the same resolution — keep the 3 axes, add deterministic policy fields (`capacity{maxCurrent,overflowPolicy}` / `collection.mode=set_snapshot` / `valueSemantics`+typed comparator / `temporal:windowed`), with **default `reject` on bounded-N overflow** ("the engine must never guess which incumbent to supersede" — matching the security lens verbatim). Two independent agent systems reaching the same architecture is strong validation. One divergence: the the tracker CTO judged numeric **fully** deterministic via a typed comparator, vs the Claude panel's ~20% LLM-residue for ambiguous-from-text numeric — an open question to settle when implementing.
 
-**Field-name lock (2026-06-03):** the 5-axis descriptor is now **locked into `company-brain/schema/relations.yaml`** for all 15 spine relations — `arity {1|N|inf}`, `overflow_policy {evict|reject|coexist|aggregate}` (default `reject`; functional supersede = `arity:1 + overflow:evict`), `verbs {add|add+remove}`, `temporal {static|bi-temporal|windowed}`, `contradiction {collision_key: slot|window|set|path, resolution: structural|numeric|graph_invariant|semantic}` (numeric carries a typed `comparator` `gt|lt|range_overlap` — not a new contradiction family), plus `set_snapshot:true` on set-valued relations. The legacy `cardinality`/scalar-`contradiction` fields are retained alongside for reader orientation. Values document intent for the deferred E1-mut engine; nothing executes yet. **One open question remains** for engine-implementation time, to settle empirically: numeric/range determinism — a typed comparator (Paperclip CTO: fully deterministic) vs ~20% LLM-residue for facts ambiguous-from-text with no declared comparator policy (Claude panel; LABELED-ESTIMATE).
+**Field-name lock (2026-06-03):** the 5-axis descriptor is now **locked into `company-brain/schema/relations.yaml`** for all 15 spine relations — `arity {1|N|inf}`, `overflow_policy {evict|reject|coexist|aggregate}` (default `reject`; functional supersede = `arity:1 + overflow:evict`), `verbs {add|add+remove}`, `temporal {static|bi-temporal|windowed}`, `contradiction {collision_key: slot|window|set|path, resolution: structural|numeric|graph_invariant|semantic}` (numeric carries a typed `comparator` `gt|lt|range_overlap` — not a new contradiction family), plus `set_snapshot:true` on set-valued relations. The legacy `cardinality`/scalar-`contradiction` fields are retained alongside for reader orientation. Values document intent for the deferred E1-mut engine; nothing executes yet. **One open question remains** for engine-implementation time, to settle empirically: numeric/range determinism — a typed comparator (the tracker CTO: fully deterministic) vs ~20% LLM-residue for facts ambiguous-from-text with no declared comparator policy (Claude panel; LABELED-ESTIMATE).
 
 ## §7 — `namespace` / ACL (isolation — convergent blocker B1)
 
@@ -215,3 +215,36 @@ Index-side hypothetical-question vectors (HyDE-style) are a **deferred** recall 
 - **Regenerated** on the **G1-sweep dirty-flag** (same freshness trigger as embeddings; `source_content_rev` tracks the `content_rev` it was built from).
 - **Quarantined** — the generated question text/vector is **never** persisted as `long_context`, **never** fed to D4 extraction, and **never** round-trips into a fact edge. It is a search-time proxy only.
 - **Eval-gated** — kept only if a **recall@k lift is empirically proven**. The gain is corpus-dependent and **unmeasured here**; if no lift, the `:SearchProxy` layer is simply not built.
+
+## §11 — Embedding-staleness resolution (FIX-STALE / convergent blocker S1·B5)
+
+The two reviewers flagged a contradiction between PART 3-B (a `dirty`-flag re-embed sweep) and
+PART 3-C ("re-embed nothing"), plus an undefined read-during-dirty window and an unmonitored
+sweep. Resolved here; the sweep + monitor are implemented in `company-brain/sweep.py`.
+
+**0-hop vs 1-hop — resolved: 0-hop is correct, 1-hop is unnecessary BY CONSTRUCTION.**
+Embeddings in this design are **intrinsic-content only** — a node's vector is a function of its
+OWN `long_context`/`chunks`, never of its neighbours (no GraphSAGE-style neighbourhood
+aggregation). Therefore a content edit on node X can change only X's vector; no neighbour's
+vector depends on X's content. The re-embed sweep is **0-hop**: it re-embeds exactly the dirty
+node. The "1-hop" intuition (re-embed neighbours of an edited node) only applies to
+graph-aggregated embeddings, which this system explicitly does **not** use. PART 3-C's
+"re-embed nothing [on an edge change]" and PART 3-B's "re-embed the dirty node [on a content
+change]" are therefore **not in conflict**: an *edge* change re-embeds nothing (0 nodes); a
+*content* change re-embeds 1 node (the node itself). The trigger is `content_rev`, never edges.
+
+**Read-during-dirty semantics — defined.** Between a content edit (`dirty=true`, `content_rev`
+bumped) and the next sweep, a read sees:
+- **Fact path (graph MATCH):** always **current** — facts are bi-temporal edges, never embedded,
+  so a pending re-embed cannot stale a fact. Reads of facts are unaffected.
+- **Recall path (vector search):** may return the node on its **pre-edit** vector. The card is
+  stamped `fresh=stale` by F4-stamp (driven by `dirty`), so the action gate (`gate.py`) treats
+  any recall hit on a dirty node as stale → REFUSE/abstain for an action, down-weight for an
+  answer. Recall is *best-effort and flagged*, never silently authoritative, during the window.
+- **Guarantee:** `embedded_content_rev == content_rev` ⟺ the vector matches current content. The
+  sweep restores equality and clears `dirty`; until then the inequality is the staleness signal.
+
+**Sweep liveness monitoring.** `sweep_queue_depth()` emits `reembed_queue_depth` (count of
+`dirty=true` nodes) with an alarm above `QUEUE_ALARM_THRESHOLD`, so a stalled sweep (cold nodes
+silently rotting) is observable rather than invisible. Wire the metric to the same online seam
+as the eval scores (Langfuse / metrics sink).

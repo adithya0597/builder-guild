@@ -1,19 +1,17 @@
-"""D1 ETL spine (beads cb-dfv.1): Paperclip-shaped structured state -> Neo4j via deterministic
+"""D1 ETL spine (beads cb-dfv.1): issue-tracker-shaped structured state -> Neo4j via deterministic
 MERGE / MATCH-SET, per the relations.yaml rules. ZERO LLM (pure neo4j driver, no model calls).
 
-SOURCE = FIXTURE stand-in (live Paperclip API is down). To go live, replace fetch_source()
-with the neo4j-graphrag/Paperclip client GET; everything downstream is unchanged.
+SOURCE = FIXTURE stand-in (live tracker API is down). To go live, replace fetch_source()
+with the neo4j-graphrag/tracker client GET; everything downstream is unchanged.
 """
-import os
 from neo4j import GraphDatabase
 from datetime import datetime, timezone
 
-URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-AUTH = (os.environ.get("NEO4J_USER", "neo4j"), os.environ.get("NEO4J_PASSWORD", "companybrain"))
+URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 
 
 def fetch_source(status_acme1="open"):
-    """Paperclip-shaped state. status_acme1 param lets us simulate a later status change."""
+    """issue-tracker-shaped state. status_acme1 param lets us simulate a later status change."""
     return {
         "agents":  [{"id": "cto", "role": "CTO"}, {"id": "eng1", "role": "engineer"}],
         "projects":[{"id": "acme"}],

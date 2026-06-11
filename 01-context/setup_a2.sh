@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A2 (cb-6a1.2): dedicated venv + neo4j-graphrag-python + smoke-test write/read.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(cd "$(dirname "$0")" && pwd)"
 [ -d .venv ] || python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -q --upgrade pip >/dev/null 2>&1
