@@ -1,5 +1,13 @@
-neo4j>=5.26
-neo4j-graphrag
-python-igraph
-leidenalg
-networkx
+# Builder Guild — core runtime dependencies.
+#
+# All core deps are permissive (Apache-2.0 / BSD-3). This keeps the AGPL-licensed
+# core free of third-party copyleft, so it can ALSO be offered under a separate
+# commercial license (see DUAL_LICENSE.md) without entanglement.
+neo4j>=5.26          # Apache-2.0  (Python driver; the Neo4j DB runs as a separate process)
+neo4j-graphrag       # Apache-2.0
+networkx             # BSD-3-Clause — default community-detection backend
+
+# Optional, higher-quality Leiden community detection lives in
+# requirements-leiden.txt and pulls GPL deps. communities.py uses algo="auto",
+# which falls back to the networkx backend when Leiden is absent — so the core
+# runs fully without it. Read that file before installing.

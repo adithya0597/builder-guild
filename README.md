@@ -87,4 +87,14 @@ That discipline — measure, refuse, fix, re-measure — is the product.
 
 ## License
 
-See [LICENSE](LICENSE). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+Builder Guild is licensed under **AGPL-3.0** (see [LICENSE](LICENSE)) — free to
+use, modify, and self-host, with network-use copyleft (§13). A **commercial
+license** with no AGPL obligations is available for proprietary or
+closed-hosted use — see [DUAL_LICENSE.md](DUAL_LICENSE.md).
+
+The default community-detection backend is networkx (BSD-3). An optional,
+higher-quality Leiden backend (`requirements-leiden.txt`) pulls GPL deps and is
+**off by default**.
+
+Contributions require a lightweight CLA so the dual-license can be maintained —
+see [CONTRIBUTING.md](CONTRIBUTING.md).

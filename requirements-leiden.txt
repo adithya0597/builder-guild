@@ -1,0 +1,20 @@
+# OPTIONAL: Leiden community detection (higher quality than the networkx default).
+#
+#   pip install -r requirements-leiden.txt
+#
+# ⚠️  LICENSE WARNING — these packages are GPL:
+#       leidenalg      GPL-3.0
+#       python-igraph  GPL-2.0(+)
+#
+# Installing them and running the Leiden path (algo="leiden", or algo="auto" when
+# they are importable) creates a combined GPL work AT RUNTIME on your machine.
+#
+# The Builder Guild core does NOT depend on these. 01-context/src/communities.py
+# uses algo="auto" and falls back to the networkx (BSD-3) backend on ImportError,
+# so the project runs fully without them.
+#
+# A commercial Builder Guild license (see DUAL_LICENSE.md) does NOT relicense
+# these third-party GPL packages. To keep your deployment free of third-party
+# copyleft, stay on the default networkx backend.
+leidenalg
+python-igraph
