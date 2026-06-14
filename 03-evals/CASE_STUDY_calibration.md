@@ -75,3 +75,38 @@ golden item stays red until it exists.
 
 The pattern to copy is the ratchet: **measure → refuse → fix → re-measure**, with every refusal
 recorded as precisely as every pass.
+
+## Corrective RAG — we detect weak retrieval AND fix it (cb-k97.1)
+
+The calibration run exposed a second gap beyond answer-shape: **weak queries abstain when the right
+node exists but is not surfaced by the initial retrieve**. The keyword rung fixed the lexical-ID
+trap; Corrective RAG closes the remaining loop: if the grader returns `abstain`, the system now
+rewrites the query deterministically (local, $0) and re-retrieves, bounded by `max_rewrites`.
+
+**Recovery tactics (ordered; stop at first non-abstain):**
+
+1. **id_extract** — regex-extract `[A-Za-z]+-\d+` / `issue:…` / `agent:…` tokens; re-serve with
+   just the IDs (lets keyword_rung land an exact-ID hit on queries that bury the ID in prose).
+2. **pattern_synth** — map a verb to an ONTOLOGY relation (block→BLOCKS, depend→DEPENDS_ON,
+   own→OWNS, assign→ASSIGNED_TO) + extract the object key; re-serve with `query_text=''` and
+   `pattern={rel, obj}` (fires graph_rung directly; empty query avoids keyword noise overriding
+   the structural hit).
+3. **neighbor_expand** — pull 1-hop neighbor keys from the first result's `presentable_facts`;
+   append to query and re-serve (broadens vector recall into the graph neighbourhood).
+4. **decompose** — strip stopwords / split on "and"/","; re-serve sub-queries.
+
+**Invariants proven against the ACME graph (eval_corrective.py, 6 tests, all pass):**
+
+- T1 flip: a weak phrasing that initially abstains flips to pass/partial after one local rewrite.
+- T2 bounded: unrecoverable query reaches `resolved_at="exhausted"` with `rewrites_used ≤ max_rewrites`.
+- T3 no-op guard: no `(query, pattern)` probe repeats across the attempted list.
+- T4 isolation: finance-role rewrites never surface engineering nodes; `trace.isolation.clean` true every iteration.
+- T5 $0-or-STOP: a fake web CLI echoing "payment required" raises RuntimeError immediately.
+- T6 web off default: `corrective_serve()` with default args never calls the web adapter.
+
+The web fallback (`web_fallback_adapter.py`) is OFF by default (`CORRECTIVE_WEB_ENABLED=false`).
+When ON, any `payment|api key required|quota exceeded|billing` signal from the CLI raises RuntimeError —
+STOP, never silently pay. Default path: local tactics exhaust → `resolved_at="exhausted"`.
+
+Files: `01-context/src/corrective.py`, `01-context/src/web_fallback_adapter.py`,
+`03-evals/src/eval_corrective.py`.

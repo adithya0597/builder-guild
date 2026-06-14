@@ -24,6 +24,7 @@ A SOTA embedder buys a few points; a cross-encoder reranker buys ~+11% and conte
 - **Long-context wins on quality when resourced** (GPT-4o/Gemini-1.5-Pro); LC ≡ RAG on >60% of queries — RAG vs LC [2407.16833](https://arxiv.org/abs/2407.16833) [abstract].
 - **But retrieve for cost**: the hybrid "Self-Route" (let model answer from RAG, fall back to LC only when it declines) **matches LC quality at −65% cost** (Gemini-1.5-Pro) / −39% (GPT-4o). Same source.
 - **And retrieve when the corpus doesn't fit / changes / must be cited.** 1M-ctx is not free: single-needle recall >99.7% at 1M (Gemini-1.5, [2403.05530](https://arxiv.org/abs/2403.05530)) but **multi-needle collapses to ~60%**, and quality decays with length (context rot, [Chroma](https://www.trychroma.com/research/context-rot): NIAH −20–50% from 10k→100k+ across 18 models).
+- **Context-length discipline in this stack (why the caps exist):** context rot is the grounding for the serve-side node-card truncating injected `long_context` to a fixed prefix (`serve.py`: `ctx['ctx'][:200]`) and presenting only the role's top-K cards rather than the whole subgraph — a shorter, position-stable context beats a longer one the model handles unevenly ([Chroma context-rot](https://www.trychroma.com/research/context-rot)).
 
 > Rule for this stack: default to **plan-mode + agentic search** (the model greps/reads files itself) for known repos; reach for embedded retrieval only when the corpus is large, external, or must be cited. Add a reranker before adding a bigger embedder.
 
@@ -66,3 +67,50 @@ The retrieval question for *memory across sessions*. Benchmark = **LOCOMO** ([24
 **Conditionals the levers carry:** rerank costs latency (BM25+CE ~450 ms GPU / 6100 ms CPU) and *loses* on out-of-distribution tasks (ArguAna, Touché) — "always rerank" needs a budget; contextual-chunking 49/67% is config-specific (Gemini embedder, 1−recall@20); Self-Route "cost" = input-tokens only (not wall-clock); **Power-of-Noise: random padding can *help* (+35%) while semantic hard-negatives *hurt* — so distractor-filtering must drop HIGH-similarity non-gold, not low-similarity random** (the naive "filter low-relevance" is backwards).
 - MTEB v1 vs v2 not comparable. Community signal = sentiment, direction only.
 - Companion: `MODEL_ROUTING.md`. Community raw: `~/Documents/Last30Days/rag-retrieval-failure-for-ai-agents-raw-v3.md`.
+
+## Corrective RAG — bounded rewrite→re-retrieve loop (cb-k97.1)
+
+Implementation of CRAG [2401.15884] at the serve layer. When `abstain` is returned by the grader,
+`corrective_serve()` (in `01-context/src/corrective.py`) rewrites the query deterministically
+and re-retrieves, up to `max_rewrites` distinct probes. Pure Python, $0/local — no model calls.
+
+**Loop shape:**
+
+```
+initial serve() → grade
+  if pass/partial/escalate → return immediately (answer stands or human gate)
+  if abstain:
+    for tactic in [id_extract, pattern_synth, neighbor_expand, decompose]:
+        if rewrites_used >= max_rewrites: break
+        if probe already tried (no-op guard): skip
+        candidate = serve(rewritten_query, role, pattern=new_pattern)
+        assert trace.isolation.clean   # namespace isolation on every hop
+        if candidate.decision != abstain: return candidate (resolved)
+        rewrites_used += 1
+    optional web fallback (OFF by default; $0-or-STOP on payment signal)
+    return exhausted
+```
+
+**When to reach for it:** any query path where `decision == "abstain"` but the correct node
+provably exists in the graph — weak/verbose user phrasings, prose-buried IDs, verb→relation
+queries. Not a substitute for fixing the retrieval pipeline; use after the keyword/graph/vector
+rungs are already tuned.
+
+**Interface:**
+
+```python
+from corrective import corrective_serve
+
+result = corrective_serve(
+    query_text, role,
+    pattern=None,       # optional structural {rel, obj}
+    action=None,
+    max_rewrites=2,     # hard bound on distinct probes
+    web_fallback=False, # OFF by default; requires CORRECTIVE_WEB_ENABLED=true
+)
+# result is serve()'s dict plus result["corrective"]:
+#   {attempted, resolved_at, rewrites_used, web_fallback}
+```
+
+See `03-evals/src/eval_corrective.py` for acceptance tests (6 tests including isolation,
+bounded loop, $0-or-STOP web guard).

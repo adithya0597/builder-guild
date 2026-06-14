@@ -31,6 +31,11 @@ to a namespace. Two seats deserve special care:
   no write path, and a security seat that constrains it (mutual constraint, not hierarchy).
 - **Naming:** keep keys functional (`agent:cto`), put display names in an alias property. Never
   couple graph keys (and therefore golden sets) to branding.
+- **`role` is an authorization scope, not a performance knob.** Personas in system prompts do **not**
+  reliably improve factual accuracy, and automatic persona-selection is "no better than random"
+  ([Zheng et al., Findings of EMNLP 2024](https://aclanthology.org/2024.findings-emnlp.888/)). So a
+  seat governs *what an agent may read* (its namespace slice), never a hoped-for quality lift —
+  output quality comes from the governed context + the gate, not from dressing the agent in a title.
 
 ## 3. Autonomy is leased, never granted
 

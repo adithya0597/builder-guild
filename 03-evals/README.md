@@ -45,3 +45,14 @@ temporal-abstain probes.
    layer telling you the proxy is broken. Refusing to certify is a success mode.
 
 See it all happen on real data: [`CASE_STUDY_calibration.md`](CASE_STUDY_calibration.md).
+
+## Why ≥25 trials + content-hash checkpoints (not a magic number)
+
+Judge nondeterminism is real and only controllable if you own the serving stack: without
+batch-invariant kernels, 1000 identical prompts produce **80 unique completions** (first divergence
+at token 103); with them, all 1000 are identical — [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/)
+(Horace He et al., Thinking Machines Lab, 2025; *blog, not peer-reviewed*). We do **not** control an
+external judge CLI's batch size, so we absorb that variance instead of pretending it away: the
+**≥25-trial floor with median + percentiles** (`h2b3_judge.py`) and **per-verdict content-hash
+checkpoint/resume** (`judge_adapter.py`) make a sweep reproducible enough to compute κ with a
+confidence interval. The trial count is a variance-budget choice, not folklore.

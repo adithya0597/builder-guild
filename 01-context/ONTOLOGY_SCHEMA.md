@@ -248,3 +248,47 @@ bumped) and the next sweep, a read sees:
 `dirty=true` nodes) with an alarm above `QUEUE_ALARM_THRESHOLD`, so a stalled sweep (cold nodes
 silently rotting) is observable rather than invisible. Wire the metric to the same online seam
 as the eval scores (Langfuse / metrics sink).
+
+## §12 — `:Community` as a per-namespace derived artifact (cb-k97.2)
+
+`:Community` nodes are **derived artifacts** produced by the GraphRAG community detection pipeline
+(`01-context/src/communities.py`). They are per-namespace only — the structural isolation proof is
+`assert_no_cross_namespace_community()` returning `[]`.
+
+**Node shape:**
+
+| Property | Type | Meaning |
+|---|---|---|
+| `key` | string | canonical key: `community:<namespace>:<cid>` — MERGE target |
+| `namespace` | string | owning T0 domain (`engineering`, `finance`, …, `shared`) — never null |
+| `member_count` | int | number of `:Entity` members |
+| `built_at` | string | explicit build timestamp (explicit arg, never wall-clock ambient — §10 guardrail 1) |
+| `run_id` | string | the build run identifier (reproducibility / audit) |
+| `summary` | string ∣ null | LLM-generated community summary (null in detection-only mode) |
+| `summary_at` | string ∣ null | when `summary` was generated |
+| `summarized_by` | string ∣ null | which model generated the summary |
+
+**Edge shape:**
+
+`(:Entity)-[:IN_COMMUNITY {namespace: string}]->(:Community)` — membership edge.
+The edge carries `namespace` = the community's namespace (same value). Cross-namespace membership
+is **structurally impossible**: Leiden runs over each namespace's subgraph only; the Cypher query
+that builds each subgraph filters `WHERE a.namespace=$ns AND r.namespace=$ns AND b.namespace=$ns`.
+
+**Build-time isolation (§7 + §1 of spec):** a `:Community` that would span namespaces is
+forbidden at build. The serve filter cannot catch a leak baked in at build — isolation must be
+upstream. `assert_no_cross_namespace_community()` proves this structurally.
+
+**Idempotent full rebuild:** `MATCH (c:Community {namespace:$ns}) DETACH DELETE c` before
+writing each namespace's communities. Re-running `build_communities()` yields the same community
+count per namespace, with no duplicate `:Community` nodes.
+
+**Role-scoped read:** `community_summary(session, node_key, allowed)` filters on
+`c.namespace IN $allowed` — defense-in-depth atop the build-time guarantee.
+
+**Detection-only mode:** `SUMMARY_CMD` unset → communities written, `summary=null`, no model call.
+Summary adapter (`summarize_adapter.py`) STOPs on `auth|api[ _-]?key|payment|billing|quota`.
+
+**DDL:** `schema/06_community.cypher` — canonical sample with Cypher safety notes.
+**Implemented:** `communities.py` (build + read + isolation proof) + `summarize_adapter.py`.
+**Accepted:** `build_communities()` demo prints `COMMUNITIES_OK` against cb-neo4j ACME graph.

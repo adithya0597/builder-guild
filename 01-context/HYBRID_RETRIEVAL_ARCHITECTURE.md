@@ -282,3 +282,37 @@ Shared state: `query_id · route · role · namespace_policy · freshness_sla ·
 
 ## Evidence base
 `RETRIEVAL.md` (rerank +11% BEIR; contextual chunking −49/−67% Anthropic; BRIGHT 18.3/CoT 14.8→26.5; CRAG +7–36.6%; RCR-Router T=3) · `MODEL_ROUTING.md` (couplings, categorical gate) · RRF: Cormack & Clarke SIGIR 2009 · PageIndex: github.com/VectifyAI/PageIndex (mechanism confirmed; 98.7% FinanceBench = vendor self-report, exceeds 85% oracle → unproven). FinanceBench 2311.11944 (paper-walked): vector-RAG 19% shared-store / 50% single-store, long-context 79%, oracle 85% · Neo4j/Kuzu index docs (doc-read; Kuzu vector page DNS-blocked, verify in-session) · GraphRAG 2404.16130 (paper-walked: 72–83% comprehensiveness / 62–82% diversity — but LLM-built graph for SENSEMAKING, ≠ hand-defined ontology) / LlamaIndex PropertyGraphIndex (reference pattern) · APC governance: `ai-product-council/packages/apc-governance/src/{VoteCalculator,DecisionRouter,SycophancyDetector,ForceEntryEvaluator}.ts` (real tested code; live-debate + calib L2/3 doc-only). Depth: graph/PageIndex docs read in-session; APC verified file:line; arxiv abstract-level except BEIR/ColBERTv2/EmbeddingGemma paper-walked. Panel: 3× Opus + 2 grounded research streams, 2026-06-01.
+
+---
+
+## GraphRAG community summaries — closed gap vs Microsoft GraphRAG (cb-k97.2)
+
+**The gap (from rev 4 paper-walk):** Microsoft GraphRAG (2404.16130) wins on comprehensiveness and
+diversity by running Leiden community detection over the full graph, then generating per-community
+LLM summaries that are used at query time. Our hand-defined ontology (PART 0) gives structural
+traversal that GraphRAG lacks — but we had no community-level summaries, so long-range thematic
+questions (spanning many nodes without a clear structural path) had no summary target to retrieve
+against. This was the named gap: "GraphRAG-style community sensemaking" absent from our stack.
+
+**What cb-k97.2 delivers:**
+
+| Component | What it does |
+|---|---|
+| `communities.py — build_communities()` | Per-namespace Leiden (`leidenalg` + `python-igraph`, networkx fallback) over each namespace's intra-namespace subgraph. Writes `:Community` + `:IN_COMMUNITY` edges, both namespace-stamped. |
+| `communities.py — community_summary()` | Role-scoped read — `c.namespace IN $allowed` filter at read time; returns None if namespace not allowed. |
+| `communities.py — assert_no_cross_namespace_community()` | Structural isolation proof — returns `[]` iff no `:Community` has members from >1 namespace. The cardinal bug is a cross-namespace community baked in at build; this catches it. |
+| `summarize_adapter.py` | Pluggable $0-or-STOP one-shot CLI adapter (mirrors `judge_adapter.py`). `SUMMARY_CMD` unset → detection-only. STOPs on `auth\|api[ _-]?key\|payment\|billing\|quota`. |
+
+**Why our GraphRAG is better on isolation:** Microsoft GraphRAG builds communities over a flat
+graph and relies on post-hoc filtering. Our build-time isolation (ONTOLOGY §7) means a
+cross-namespace community is **structurally impossible** — Leiden never sees cross-namespace edges.
+This is stronger than a read-time filter that might be forgotten.
+
+**What we still lack vs Microsoft GraphRAG:** LLM-built graphs from unstructured text (theirs
+does LLM extraction; ours is hand-defined ontology + structured ETL). For sensemaking over
+free-text corpora their approach is better; for structured company-brain KB with deterministic
+ontology ours is more faithful and $0 on graph-building.
+
+**Implemented:** 2026-06-14, cb-k97.2. Demo: `communities.py demo()` prints `COMMUNITIES_OK`
+against the live cb-neo4j ACME graph. Acceptance: T1–T7 (spec §5) all pass.
+Unblocks: cb-t0m.3 (community refresh).
