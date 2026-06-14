@@ -22,7 +22,7 @@ echo "OPENAI_API_KEY=sk-..." > .env    # LiteLLM → can point at Anthropic/loca
 - **Fit:** pilot it on our **long markdown design/architecture docs** (the natural PageIndex use case), NOT on code.
 
 ## Pilot eval design (minimal, runnable; mirrors FinanceBench methodology)
-1. **Corpus:** 1 representative long markdown doc, target **>50 sections** so tree-search matters (e.g. a concatenated architecture/runbook doc, or this `.hermes` doc-set merged).
+1. **Corpus:** 1 representative long markdown doc, target **>50 sections** so tree-search matters (e.g. a concatenated architecture/runbook doc, or a merged multi-doc set).
 2. **Q&A set:** hand-write **15-20 pairs**, each tagged with the **gold section/heading** holding the answer. Mix: **8 single-section** lookups · **7 multi-section/synthesis** · **5 negative** ("not in doc" — must abstain).
 3. **Arms:**
    - **A = PageIndex** — `index(doc.md)` → agentic query; record selected `node_id`s + answer.
