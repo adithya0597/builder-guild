@@ -1,6 +1,6 @@
-"""Serve-side context management (beads cb-ax8.*).
+"""Serve-side context management.
 
-F1 (cb-ax8.1): a node-card is assembled at READ = long_context (stable) + a LIVE bi-temporal
+F1: a node-card is assembled at READ = long_context (stable) + a LIVE bi-temporal
 edge query, role-scoped by namespace and validity+freshness stamped. Nothing fact-inclusive is
 cached — the card is built per request, so it is always current (PART 3-B).
 """
@@ -28,8 +28,54 @@ def node_card(key, allowed):
         return rec.data() if rec else None
 
 
+def _support_coverage(query_text, primary, presentable_facts):
+    """G3 Item 2 — DETERMINISTIC support-fact coverage signal (replaces the anti-correlated
+    fact-count proxy that fit W_SUFFICIENCY≈−4.089). Pure (no Neo4j, no globals) so test_g3 can
+    drive THIS function rather than a mirror that can drift from prod.
+
+    coverage = |asked-entities found in SUPPORT| / max(1, |asked-entities|)
+      Q = entity ids named in the question (ACME/SPI id patterns + agent:/issue: tokens)
+      R = entities the SUPPORT actually covers — the `-> target` of each presentable fact, PLUS
+          the primary IFF it carries >=1 presentable fact. A node with NO presentable facts is
+          UNSUPPORTED (the faithfulness gate already abstains on it), so it contributes NOTHING to
+          support coverage — counting its bare key would let a dead-end retrieval (a node named in
+          the question but with no edges) score high sufficiency and trip the planner's
+          confident-abstain early-stop BEFORE the multi-hop that finds the answer.
+    Capped at 1.0; over-retrieval earns nothing (minimal-sufficient-subgraph principle).
+
+    CANONICALIZATION: the question names BARE ids ("SPI-3"); retrieved keys are PREFIXED
+    ("issue:SPI-3", "agent:cto"). Intersecting them raw never matches -> coverage collapses to 0.0
+    even when the asked entity IS in the support, RE-CREATING the very anti-correlation this signal
+    removes. Normalize BOTH sides to the id token after the last ":" before intersecting.
+
+    NO COUNT FALLBACK (codex HIGH-1): when the question yields no extractable ids (|Q|=0) we CANNOT
+    measure support coverage without identifiable asked-entities, so return a conservative 0.0 —
+    NEVER score by raw fact count (that is the exact anti-correlated proxy this change removes,
+    and it would silently reappear on NL questions the regex misses).
+
+    HONEST NOTE: a positive sufficiency refit is NOT demonstrable on the public 10-item example
+    set (its pass items have near-zero variance -> unstable weight). This signal is deterministic
+    and NO LONGER anti-correlated BY CONSTRUCTION — the +gain claim requires the private 6-role
+    golden + real sweep (founder gate). Do not claim gain here.
+    """
+    def _canon(k):
+        return k.rsplit(":", 1)[-1]
+    q = {_canon(k) for k in re.findall(
+        r"\b(?:issue|agent):[A-Za-z0-9_-]+|[A-Z]+-\d+", query_text or "")}
+    if not q:
+        return 0.0
+    r = set()
+    for f in presentable_facts:
+        m = re.search(r"->\s*(\S+)", f)
+        if m:
+            r.add(_canon(m.group(1)))
+    if presentable_facts:                 # primary counts only when it actually carries support
+        r.add(_canon(primary))
+    return round(min(1.0, len(q & r) / max(1, len(q))), 2)
+
+
 def serve(query_text, role, pattern=None, action=None):
-    """INT-3 (cb-djp.3): the end-to-end serve chain on the real graph. WIRES the modules:
+    """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
     gate+abstain (sufficiency x confidence, suggest-only) -> execute.
 
@@ -59,7 +105,7 @@ def serve(query_text, role, pattern=None, action=None):
 
         # 2. FUSE — RRF across whichever sources fired. keyword is listed FIRST: on an RRF score
         # tie the stable sort keeps the earlier-seen key, so an exact-ID reference beats an
-        # equally-ranked fuzzy hit (cb-s36; weighted RRF is the R7 upgrade).
+        # equally-ranked fuzzy hit (weighted RRF is the R7 upgrade).
         rankings = {**({"keyword": kw_hits} if kw_hits else {}),
                     **({"graph": graph_hits} if graph_hits else {}),
                     **({"vector": vec_keys} if vec_keys else {})}
@@ -83,7 +129,7 @@ def serve(query_text, role, pattern=None, action=None):
         trace["stamp_reconcile"] = {"node_fresh": node_fresh, "n_current": card["n_current"],
                                     "n_superseded": card["n_superseded"], "actionable": card["actionable"]}
 
-        # 4b. COMPOSE (R1+R2, cb-s36): the ANSWER surface = content + current facts of the top-K
+        # 4b. COMPOSE (R1+R2): the ANSWER surface = content + current facts of the top-K
         # fused cards (K = role T-cap), all role-scoped. Fixes the edge-only-card gaps: status and
         # prose live in long_context; set + multi-hop answers span multiple cards.
         # DELIBERATE SPLIT: claims/sufficiency for the GATE stay primary-card-based below —
@@ -146,8 +192,13 @@ def serve(query_text, role, pattern=None, action=None):
             self_conf, conf_basis = round(min(0.99, vec_score), 2), "vector_score"
         else:
             self_conf, conf_basis = 0.95, "graph_structural_exact"
-        sufficiency = round(min(1.0, len(card["presentable"]) / 3.0), 2)
-        decision = abstain.stage_a_decision(claims, action, sufficiency, self_conf)
+
+        # G3 Item 2 — DETERMINISTIC support-fact coverage signal. Computed by the pure
+        # module-level helper _support_coverage() (see its docstring): canonicalized
+        # bare-vs-prefixed intersection, support-gated R, and |Q|=0 -> 0.0 (NO count fallback).
+        sufficiency = _support_coverage(query_text, primary, [f["fact"] for f in card["presentable"]])
+
+        decision = abstain.stage_a_decision(claims, action, sufficiency, self_conf, role=role)
         executed = abstain.execute(decision, lambda: f"acted on {primary}")
         trace["gate_abstain"] = {"sufficiency": sufficiency, "self_confidence": self_conf,
                                  "confidence_basis": conf_basis, **decision,

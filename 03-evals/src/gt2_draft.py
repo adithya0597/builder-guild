@@ -1,4 +1,4 @@
-"""GT-2 (beads cb-hjv.5.2): auto-DRAFT the V0 golden set from the live eng+fin graph slice.
+"""GT-2: auto-DRAFT the V0 golden set from the live eng+fin graph slice.
 
 The hybrid the literature mandates (CONTEXT_EVALS §0/§4; web-search 2026-06-05: synthetic-only
 fails, public-trained-on Q&A is contamination-poisoned): an LLM drafts, a HUMAN validates. Here the
@@ -7,7 +7,7 @@ call); the candidate answers + support-fact sets are pulled DETERMINISTICALLY fr
 every draft is grounded and reproducible.
 
 NO FABRICATION: a draft's `correct_answer` is left "" and `validated=False`. The graph-derived guess
-goes in a SEPARATE `candidate_answer` field clearly marked CANDIDATE. The human (GT-5, cb-hjv.5.3)
+goes in a SEPARATE `candidate_answer` field clearly marked CANDIDATE. The human (GT-5)
 confirms/corrects it into `correct_answer` and flips `validated`. The agent never asserts an
 unvalidated answer as ground truth and never closes GT-5.
 
@@ -102,9 +102,9 @@ def draft(g):
 
 
 def write_review(items, path):
-    lines = ["# golden_v0_review.md — V0 golden set awaiting human validation (GT-5 / cb-hjv.5.3)",
+    lines = ["# golden_v0_review.md — V0 golden set awaiting human validation (GT-5)",
              "",
-             "> Auto-drafted by GT-2 (cb-hjv.5.2) from the live engineering+finance graph slice. Each",
+             "> Auto-drafted by GT-2 from the live engineering+finance graph slice. Each",
              "> item's `candidate_answer` is GRAPH-DERIVED but UNVALIDATED. **Adithya:** for each item,",
              "> confirm or correct the candidate, then set `correct_answer` + `validated=true` in",
              "> `example_golden.jsonl`. Do not trust a candidate until you've checked it against the graph.",

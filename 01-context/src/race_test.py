@@ -1,4 +1,4 @@
-"""FIX-RACE (beads cb-dfv.5): prove per-subject write-lock serialization gives exactly ONE
+"""FIX-RACE (the Context-Engineering epic): prove per-subject write-lock serialization gives exactly ONE
 current functional edge under concurrent re-ingest.
 
 Two threads concurrently apply ASSIGNED_TO for the SAME subject to DIFFERENT agents, started

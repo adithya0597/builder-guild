@@ -1,4 +1,4 @@
-"""E1-mut (beads cb-dfv.4): parameterized MATCH mutation engine.
+"""E1-mut (the Context-Engineering epic): parameterized MATCH mutation engine.
 
 Reads schema/relations.yaml (the §10 5-axis S7 contract) and picks parameterized Cypher
 per relation instead of hand-coding it per call site:
@@ -8,7 +8,7 @@ per relation instead of hand-coding it per call site:
   mark_dirty     — content edit -> bump content_rev + set dirty=true (the G1-sweep trigger)
 
 Generalizes etl.py's hand-written functional_edge/additive_edge into one rule-driven engine
-that FIX-RACE (cb-dfv.5) and G1-sweep (cb-t0m.1) build on. ZERO LLM — pure neo4j driver.
+that FIX-RACE (the Context-Engineering epic) and G1-sweep (the Freshness epic) build on. ZERO LLM — pure neo4j driver.
 
 Spec honored (ONTOLOGY_SCHEMA §10 / §7):
   - the evaluation clock `now` is an EXPLICIT argument, never ambient datetime(), so a temporal
@@ -64,7 +64,7 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
       contradiction:graph_invariant (collision_key:path) — cycle guard: refuse an add that would
                       close a directed cycle over current edges of this relation (DEPENDS_ON, SUPERSEDES).
 
-    FIX-RACE (cb-dfv.5): any arity:1 path takes an exclusive subject-node write-lock first
+    FIX-RACE (the Context-Engineering epic): any arity:1 path takes an exclusive subject-node write-lock first
     (pure write, no read-upgrade deadlock) so concurrent writers serialize -> exactly one current.
     """
     rule = RULES[rel]

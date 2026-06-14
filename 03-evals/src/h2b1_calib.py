@@ -1,7 +1,7 @@
-"""H2b-1 (beads cb-hjv.3.1): the calibration HARNESS — eRAG per-unit source weights + the
+"""H2b-1: the calibration HARNESS — eRAG per-unit source weights + the
 sufficiency×confidence logistic fit. CODE ONLY, demoed on a SYNTHETIC fixture.
 
-This builds what H2b-5 (cb-hjv.3.3, the SPEND GATE) will RUN on the real validated golden set with a
+This builds what H2b-5 (the SPEND GATE) will RUN on the real validated golden set with a
 real non-self-family judge. Here the judge/answer functions are MOCKS and the labels are synthetic,
 so the demo is $0 and deterministic. It proves the two pieces of machinery work:
 
@@ -125,9 +125,12 @@ def demo():
     fail += [] if gain_pp > 0 else ["combined gate must beat confidence-only (the §0 selective-accuracy effect)"]
 
     # ---- guardrails: did NOT touch abstain.py's calibration state ----
+    # CALIBRATED is now a per-namespace dict; guard checks all namespaces remain False
     import abstain
-    untouched = (abstain.CALIBRATED is False and abstain.W_SUFFICIENCY == 2.0 and abstain.TAU == 0.5)
-    print(f"[gate]    abstain.CALIBRATED={abstain.CALIBRATED} (untouched={untouched}) — flip is H2b-5, not here")
+    all_false = isinstance(abstain.CALIBRATED, dict) and all(v is False for v in abstain.CALIBRATED.values())
+    untouched = (all_false and abstain.W_SUFFICIENCY == 2.0 and abstain.TAU == 0.5)
+    print(f"[gate]    abstain.CALIBRATED={abstain.CALIBRATED} all_false={all_false} "
+          f"(untouched={untouched}) — flip is H2b-5, not here")
     fail += [] if untouched else ["H2b-1 must NOT flip CALIBRATED or mutate abstain weights"]
 
     if fail:

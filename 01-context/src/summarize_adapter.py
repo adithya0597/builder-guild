@@ -1,4 +1,4 @@
-"""Pluggable $0-or-STOP summary adapter (beads cb-k97.2).
+"""Pluggable $0-or-STOP summary adapter (GraphRAG communities).
 
 Mirrors judge_adapter.py BUT:
   - env read at CALL TIME, not import time (so tests can swap env per-call)
@@ -18,7 +18,7 @@ import time
 
 # SUMMARY_CMD / SUMMARY_MODEL are read at CALL TIME inside _cmd(), never at import — so callers and
 # tests set them per-call (the sibling adapter's import-time capture was a real bug). There is NO
-# module-level model global (codex review cb-k97.2 MED: a `None` global was misread as the active
+# module-level model global (codex review GraphRAG communities MED: a `None` global was misread as the active
 # model and stamped 'unknown' on every summarized write).
 
 # STOP regex: matches auth, api_key, api-key, api key, payment, billing, quota
@@ -129,7 +129,7 @@ def summarize(member_texts, fact_lines, *, key=None, ckpt=None):
     members_section = "\n".join(f"- {t}" for t in member_texts) if member_texts else "(none)"
     facts_section = "\n".join(f"- {f}" for f in fact_lines) if fact_lines else "(none)"
     prompt = (
-        "You are a company-brain summarizer. Summarize this knowledge-graph community "
+        "You are a knowledge-graph summarizer. Summarize this knowledge-graph community "
         "in one concise paragraph (≤80 words). Use only the provided members and facts.\n\n"
         f"Members:\n{members_section}\n\nIntra-community facts:\n{facts_section}\n\n"
         'Reply with compact JSON: {"summary": "<text>"}'

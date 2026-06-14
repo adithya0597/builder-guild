@@ -1,4 +1,4 @@
-"""GraphRAG community summaries (beads cb-k97.2).
+"""GraphRAG community summaries.
 
 Per-namespace Leiden community detection over the intra-namespace subgraph.
 Build-time isolation: Leiden runs WITHIN each namespace only; cross-namespace edges
@@ -48,7 +48,7 @@ def _nx_partition(node_keys, edges):
     g.add_nodes_from(node_keys)
     g.add_edges_from([(a, b) for a, b in edges if a in node_keys and b in node_keys])
     # greedy_modularity_communities is deterministic (greedy); networkx 3.6 has NO seed kwarg
-    # (codex review cb-k97.2 HIGH: seed=42 raised TypeError so the fallback never ran). Enforce a
+    # (codex review GraphRAG communities HIGH: seed=42 raised TypeError so the fallback never ran). Enforce a
     # stable order ourselves: by size desc, then sorted members.
     communities = nx.algorithms.community.greedy_modularity_communities(g)
     out = [set(c) for c in communities]
@@ -74,7 +74,7 @@ def _detect_communities(node_keys, edges, resolution, algo):
 def _delete_ns_communities(session, ns):
     """Full rebuild: wipe :Community nodes for this namespace BY namespace OR by key-prefix, so a
     stale/orphan community carrying null or a wrong namespace but this ns's key is also swept
-    (codex review cb-k97.2 MED: a null-namespace orphan survived a namespace-only delete)."""
+    (codex review GraphRAG communities MED: a null-namespace orphan survived a namespace-only delete)."""
     session.run(
         "MATCH (c:Community) WHERE c.namespace = $ns OR c.key STARTS WITH $prefix DETACH DELETE c",
         ns=ns, prefix=f"community:{ns}:",
@@ -179,7 +179,7 @@ def build_communities(
         namespaces = NAMESPACES
 
     # Explicit clock — REQUIRED on the write path (ONTOLOGY §10 guardrail 1). Raise rather than
-    # silently stamp a sentinel (codex review cb-k97.2 MED: 'unset' permitted non-reproducible writes).
+    # silently stamp a sentinel (codex review GraphRAG communities MED: 'unset' permitted non-reproducible writes).
     if now is None:
         raise ValueError("build_communities: `now` is required (explicit clock) — pass a fixed/ISO "
                          "timestamp string; no wall-clock-ambient or sentinel writes")
@@ -238,7 +238,7 @@ def build_communities(
                 if summary is not None:
                     comm_key = f"community:{ns}:{cid}"
                     # Read the model from env at write time — there is no module model global
-                    # (codex review cb-k97.2 MED: summarized_by stamped 'unknown' even when set).
+                    # (codex review GraphRAG communities MED: summarized_by stamped 'unknown' even when set).
                     session.run(
                         "MATCH (c:Community {key: $key}) "
                         "SET c.summary = $summary, "
@@ -301,7 +301,7 @@ def assert_no_cross_namespace_community(session) -> list:
     namespace equals the community's own namespace field.
     """
     # Start from ALL :Community (OPTIONAL MATCH members) so memberless ghosts are caught, and check
-    # the membership EDGE namespace too — not just the node namespace (codex review cb-k97.2 HIGH:
+    # the membership EDGE namespace too — not just the node namespace (codex review GraphRAG communities HIGH:
     # the prior query required a member edge and ignored m.namespace, so it was a hollow proof).
     rows = session.run(
         "MATCH (c:Community) "
@@ -324,7 +324,7 @@ def assert_no_cross_namespace_community(session) -> list:
 # --- Demo (T1–T7 acceptance tests) ------------------------------------------
 
 def demo():
-    """Run T1–T7 acceptance tests against the live cb-neo4j graph.
+    """Run T1–T7 acceptance tests against the local Neo4j graph.
     Prints COMMUNITIES_OK on all-pass; exits 1 on any failure.
     cwd must be 01-context/src when running (sibling imports).
     """
@@ -345,7 +345,7 @@ def demo():
     def ok(tag, msg=""):
         print(f"  OK   [{tag}]{': ' + msg if msg else ''}")
 
-    print("[demo] Connecting to cb-neo4j...")
+    print("[demo] Connecting to Neo4j...")
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
 
         # --- T5: detection-only ($0, SUMMARY_CMD unset) ---
@@ -410,7 +410,7 @@ def demo():
 
         # --- T4: adapter $0-or-STOP on PROVIDER-originated auth/payment output ---
         # Stub subprocess.run so the stop phrase comes from the (fake) PROVIDER, not echoed input
-        # (codex review cb-k97.2 MED: echoing the input back was circular, not adversarial).
+        # (codex review GraphRAG communities MED: echoing the input back was circular, not adversarial).
         print("[T4] Adapter STOP on provider auth/payment output (stubbed subprocess)...")
         import summarize_adapter
 
@@ -471,7 +471,7 @@ def demo():
             fail("T6", f"duplicate Community nodes: {dup_rows}")
             ok_idem = False
 
-        # No null-namespace orphan communities should survive a full rebuild (codex review cb-k97.2 MED)
+        # No null-namespace orphan communities should survive a full rebuild (codex review GraphRAG communities MED)
         null_ns = s.run("MATCH (c:Community) WHERE c.namespace IS NULL RETURN count(c) AS n").single()["n"]
         if null_ns > 0:
             fail("T6", f"{null_ns} orphan :Community with null namespace survived rebuild")

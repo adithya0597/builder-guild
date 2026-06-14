@@ -1,4 +1,4 @@
-"""G1-sweep (beads cb-t0m.1) + the FIX-STALE (cb-t0m.2) sweep liveness monitor.
+"""G1-sweep (the Freshness epic) + the FIX-STALE (the Freshness epic) sweep liveness monitor.
 
 A content edit sets n.dirty=true (mutate.mark_dirty). A lazy, batched sweep re-embeds the dirty
 nodes (Grunt-tier model = the same local EmbeddingGemma) and clears the flag. The sweep is

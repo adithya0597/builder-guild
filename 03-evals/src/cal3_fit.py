@@ -1,4 +1,4 @@
-"""CAL-3 (beads cb-hjv.3.3.3): REAL logistic fit — serve() traces x human golden labels.
+"""CAL-3 (G3): REAL logistic fit — serve() traces x human golden labels.
 
 For each of the 10 validated golden items: run the live serve(question, role), pull the gate's
 own (sufficiency, self_confidence) from its trace, and label whether serve's answer was CORRECT
@@ -15,10 +15,15 @@ import json
 import os
 import sys
 import numpy as np
+
+# 01-context/src must be on path (mirroring eval_corrective.py convention)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "01-context", "src"))
+
 from golden import read_golden
 from serve import serve
 from h2b1_calib import fit_logistic, _sigmoid
-from judge_hermes import score_match
+from judge_adapter import score_match
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOSS_WRONG_ACT, LOSS_MISSED_ACT = 10.0, 1.0          # founder-locked 2026-06-10
@@ -26,7 +31,7 @@ LOSS_WRONG_ACT, LOSS_MISSED_ACT = 10.0, 1.0          # founder-locked 2026-06-10
 
 def answer_text(r):
     """The full ANSWER surface: primary + presentable facts + the composed evidence channel
-    (R1+R2 cb-s36: content + multi-card facts — what a consumer actually reads)."""
+    (R1+R2: content + multi-card facts — what a consumer actually reads)."""
     return (f"{r.get('primary', '')} | " + " ; ".join(r.get("presentable_facts", []))
             + " ; " + " ; ".join(r.get("composed_evidence", [])))
 
@@ -71,7 +76,7 @@ def expected_loss(scores, y, tau):
 
 def main():
     fail = []
-    items = read_golden(os.path.join(HERE, "example_golden.jsonl"))
+    items = read_golden(os.path.join(HERE, "..", "example_golden.jsonl"))
     ckpt = os.path.join(HERE, "cal3_judge.jsonl")
     rows = []
     for it in items:
@@ -108,8 +113,11 @@ def main():
           f"missed-correct={missed} expected-loss={min(losses):.0f}")
 
     import abstain
-    untouched = abstain.CALIBRATED is False and abstain.W_SUFFICIENCY == 2.0
-    print(f"[gate]    abstain.CALIBRATED={abstain.CALIBRATED} untouched={untouched} (founder flips, not this)")
+    # CALIBRATED is now a dict; must-not-flip guard: all namespaces remain False
+    all_false = isinstance(abstain.CALIBRATED, dict) and all(v is False for v in abstain.CALIBRATED.values())
+    untouched = all_false and abstain.W_SUFFICIENCY == 2.0
+    print(f"[gate]    abstain.CALIBRATED={abstain.CALIBRATED} all_false={all_false} untouched={untouched} "
+          f"(founder flips, not this)")
     fail += [] if untouched else ["CAL-3 must not mutate abstain.py"]
     fail += [] if wrong_act == 0 else [f"TAU* under 10:1 must zero wrong-acts on this slice (got {wrong_act})"]
 
@@ -118,7 +126,7 @@ def main():
                          "gain_pp": gain},
            "loss_10_1": {"tau_star": tau_star, "acts": int(act.sum()), "wrong_acts": wrong_act,
                          "missed_correct": missed},
-           "caveat": "N=10 smoke; weights NOT written to abstain.py; CALIBRATED untouched"}
+           "caveat": "N=10 smoke; weights NOT written to abstain.py; CALIBRATED dict all False (untouched)"}
     with open(os.path.join(HERE, "cal3_fit_results.json"), "w") as f:
         json.dump(out, f, indent=2)
     print("[write]   cal3_fit_results.json")

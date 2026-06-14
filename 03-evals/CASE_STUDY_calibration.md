@@ -76,7 +76,7 @@ golden item stays red until it exists.
 The pattern to copy is the ratchet: **measure → refuse → fix → re-measure**, with every refusal
 recorded as precisely as every pass.
 
-## Corrective RAG — we detect weak retrieval AND fix it (cb-k97.1)
+## Corrective RAG — we detect weak retrieval AND fix it (Corrective-RAG)
 
 The calibration run exposed a second gap beyond answer-shape: **weak queries abstain when the right
 node exists but is not surfaced by the initial retrieve**. The keyword rung fixed the lexical-ID

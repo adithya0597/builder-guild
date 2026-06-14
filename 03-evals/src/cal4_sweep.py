@@ -1,7 +1,7 @@
-"""CAL-4 (beads cb-hjv.3.3.4): the full >=25-trial DEBIASED judge sweep — resumable background batch.
+"""CAL-4 (G3): the full >=25-trial DEBIASED judge sweep — resumable background batch.
 
 Judge-based metrics only get judge-based rigor (§0 mandate): >=25 trials with median+percentiles,
-position-swap on every pairwise comparison, no-self-family (asserted in judge_hermes at import).
+position-swap on every pairwise comparison, no-self-family (asserted in judge_adapter at import).
 Deterministic metrics were settled deterministically in CAL-2/CAL-3 and are NOT re-judged here —
 25 trials of an exact-match would measure nothing.
 
@@ -22,9 +22,14 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+
+# 01-context/src must be on path (mirroring eval_corrective.py convention)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "01-context", "src"))
+
 from golden import read_golden
 from serve import serve
-from judge_hermes import score_match, judge_pair, load_checkpoint
+from judge_adapter import score_match, judge_pair, load_checkpoint
 from cal3_fit import answer_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +42,7 @@ EASY_TRIALS = 3
 
 def main():
     fail = []
-    items = {i["id"]: i for i in read_golden(os.path.join(HERE, "example_golden.jsonl"))}
+    items = {i["id"]: i for i in read_golden(os.path.join(HERE, "..", "example_golden.jsonl"))}
     answers = {iid: answer_text(serve(items[iid]["question"], items[iid]["role"])) for iid in items}
 
     jobs = []
@@ -50,7 +55,12 @@ def main():
                          judge_pair(q, answers[iid], gold, key=f"cal4:pairA:{iid}:t{t}", ckpt=CKPT)))
             jobs.append(("pairB", iid, t, lambda iid=iid, t=t, q=q, gold=gold:
                          judge_pair(q, gold, answers[iid], key=f"cal4:pairB:{iid}:t{t}", ckpt=CKPT)))
-    easy = [iid for iid in items if iid not in PROSE]
+    # Item 3 fix: exclude abstain-expected items from the easy-agree judge jobs.
+    # Sending abstain-expected items to the prose judge inflated kappa (the judge always
+    # sees "abstain" vs "abstain" as trivially matching — the kappa-inflation artifact).
+    # Abstain items are scored on the DECISION channel in cal3_fit.label_correct, not here.
+    easy = [iid for iid in items
+            if iid not in PROSE and items[iid].get("expected_decision") != "abstain"]
     for iid in easy:
         q = items[iid]["question"]
         gold = items[iid]["correct_answer"]
@@ -120,7 +130,9 @@ def main():
     print(f"[kappa]   discretionary judge-vs-human: N={len(PROSE)} -> UNMEASURABLE (by design of this slice)")
 
     import abstain
-    fail += [] if abstain.CALIBRATED is False else ["CAL-4 must not flip CALIBRATED"]
+    # CALIBRATED is now a dict; must-not-flip guard: all namespaces remain False
+    all_false = isinstance(abstain.CALIBRATED, dict) and all(v is False for v in abstain.CALIBRATED.values())
+    fail += [] if all_false else ["CAL-4 must not flip CALIBRATED (all namespaces must stay False)"]
     fail += [] if not errors else [f"{len(errors)} judge calls failed"]
 
     with open(os.path.join(HERE, "cal4_results.json"), "w") as f:

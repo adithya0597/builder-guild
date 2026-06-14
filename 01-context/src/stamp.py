@@ -1,4 +1,4 @@
-"""F4-stamp (beads cb-ax8.6): retrieval-time validity + freshness stamping, a freshness judge
+"""F4-stamp: retrieval-time validity + freshness stamping, a freshness judge
 that drops superseded facts, and an action gate that refuses to act on stale/superseded facts.
 
 READ-side only (no mutation). Extends serve.py's node-card so every fact carries:
@@ -7,7 +7,7 @@ READ-side only (no mutation). Extends serve.py's node-card so every fact carries
                                        re-embed pending, PART 3-B) so recall may be out of date
 The freshness judge drops historical facts; the action gate ALLOWS only current+fresh, else REFUSE.
 
-Naming note (coordinated with FIX-RECON cb-ax8.8): `validity` and `fresh` are the two ORTHOGONAL
+Naming note (coordinated with FIX-RECON): `validity` and `fresh` are the two ORTHOGONAL
 axes of a fact's trustworthiness — a fact can be current-but-stale (node edited, edge still valid)
 or historical-but-clean. They are never collapsed into one "confidence" scalar.
 """

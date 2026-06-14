@@ -1,4 +1,4 @@
-"""FIX-DECISION (beads cb-hjv.6): the decision-outcome / action-audit loop — the gate that closes
+"""FIX-DECISION: the decision-outcome / action-audit loop — the gate that closes
 proxy→objective. CONTEXT_EVALS §0/§1 dim 10: FAITHFULNESS (every answer claim is grounded in a
 retrieved unit) does NOT imply DECISION QUALITY (the gated action led to a good outcome). A system
 can be perfectly faithful to its context and still drive a bad decision (the context was sufficient

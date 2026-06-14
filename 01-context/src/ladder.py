@@ -1,9 +1,9 @@
-"""F2 (beads cb-ax8.3): the eval-gated retrieval ladder over the ONE graph store.
+"""F2: the eval-gated retrieval ladder over the ONE graph store.
 Rung 1 GRAPH INDEX (default, instant, no LLM) -> Rung 2 VECTOR recall -> Rung 3 PageIndex.
 Escalate only when the lower rung is insufficient (eval-gated). The graph SCOPES the PageIndex drill.
 
-Per M1 DoD the graph rung is the spine; vector (needs embeddings -> D3 cb-dfv.3) and PageIndex
-(pilot -> H1 cb-hjv.4) are the design's deferred eval-gated escalation rungs.
+Per M1 DoD the graph rung is the spine; vector (needs embeddings -> D3) and PageIndex
+(pilot -> H1) are the design's deferred eval-gated escalation rungs.
 """
 import re
 from neo4j import GraphDatabase
@@ -11,12 +11,12 @@ URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 
 
 def keyword_rung(s, allowed, text):
-    """Keyword/exact-ID rung (cb-s36; memo §18.2 'keyword retrieval: exact phrases, IDs, issue
+    """Keyword/exact-ID rung (memo §18.2 'keyword retrieval: exact phrases, IDs, issue
     references'). A query token that literally matches an in-scope node key (or its tail after
     the type prefix) is a deterministic hit — exact-ID reference is fact-authority, not fuzz.
     Fixes the lexical-semantic trap (e.g. 'what does SPI-2 block' embeds near 'status=blocked'
     cards instead of SPI-2 itself). Linear scan is fine at this graph size; swap to the FTS
-    index (cb-6a1.6) when the node count grows."""
+    index when the node count grows."""
     rows = s.run("MATCH (n:Entity) WHERE n.namespace IN $allowed RETURN n.key AS k",
                  allowed=allowed).data()
     toks = set(re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]*", text.lower()))
@@ -38,7 +38,7 @@ def vector_available(s):
 
 
 def vector_rung(s, allowed, text, k=3):
-    """Rung 2 (INT-2 cb-djp.2): real vector recall. Embed the query (local EmbeddingGemma),
+    """Rung 2 (INT-2): real vector recall. Embed the query (local EmbeddingGemma),
     queryNodes the HNSW index, then NAMESPACE-FILTER to the role's slice and cap at k.
     Over-fetch (k*5) so namespace filtering still yields up to k in-scope hits."""
     from embed import embed
@@ -73,13 +73,13 @@ def retrieve(query):
             "MATCH (n:Entity) WHERE n.pageindex_ref IS NOT NULL AND n.namespace IN $allowed RETURN n.key AS k",
             allowed=allowed)]
         trace.append({"rung": 3, "name": "pageindex",
-                      "status": "GATED: pilot H1 (cb-hjv.4)",
+                      "status": "GATED: pilot H1",
                       "graph_scopes_drill_to": longdocs or "no long-doc node in scope"})
         return {"resolved_at": "escalated", "trace": trace}
 
 
 def demo():
-    """INT-2 (cb-djp.2): real vector recall on the LIVE graph, namespace-scoped."""
+    """INT-2: real vector recall on the LIVE graph, namespace-scoped."""
     import sys
     from scope import scope
     fail = []

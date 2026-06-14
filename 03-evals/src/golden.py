@@ -1,12 +1,12 @@
-"""GT-1 (beads cb-hjv.5.1): the golden-set SCHEMA + storage + null/temporal templates.
+"""GT-1: the golden-set SCHEMA + storage + null/temporal templates.
 
 The golden set is the human-validated answer key M3 calibrates against (CONTEXT_EVALS §4). This
 module defines ONLY the contract + templates + IO + a round-trip demo — it does NOT draft questions
-(that is GT-2 cb-hjv.5.2) and does NOT contain validated answers (that is the GT-5 human gate
-cb-hjv.5.3). Two-level labels per §1/§4: the support-fact set (retrieval correctness) is stored
+(that is GT-2) and does NOT contain validated answers (that is the GT-5 human gate).
+Two-level labels per §1/§4: the support-fact set (retrieval correctness) is stored
 SEPARATELY from the correct_answer (generation correctness).
 
-Why a schema module first: every downstream harness (eRAG cb-hjv.3.1, judge sweep cb-hjv.3.2) reads
+Why a schema module first: every downstream harness (eRAG, judge sweep) reads
 this format, so the contract is the dependency the code is built against — the human labels fill it
 in later. `validated=False` on every item until a human signs off (no self-grading, §0).
 """
@@ -36,7 +36,7 @@ GOLDEN_SCHEMA = {
     "as_of":                (str,         False), # ISO ts for temporal items; absent otherwise
     "validated":            (bool,        True),  # False until a human signs off
     "draft_source":         (str,         True),  # provenance of the draft (states eRAG GT source, §4.6)
-    # human-validation provenance (added when a human signs off at GT-5 cb-hjv.5.3):
+    # human-validation provenance (added when a human signs off at GT-5):
     "validation_basis":     (str,         False), # how the human validated (e.g. paperclip_ai_native_org_model)
     "reason":               (str,         False), # the human's justification for the correct_answer
     "support_required":     (list,        False), # temporal: edges/conditions the answer REQUIRES to hold

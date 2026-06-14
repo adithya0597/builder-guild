@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A1 (cb-6a1.1): stand up Neo4j Community + confirm range/fulltext/vector index types available.
+# A1: stand up Neo4j Community + confirm range/fulltext/vector index types available.
 set -uo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 echo "== recreate cb-neo4j with fixed config =="

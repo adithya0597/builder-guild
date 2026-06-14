@@ -1,4 +1,4 @@
-# Company-brain agent-KB — Neo4j substrate (beads cb-6a1.1 / LAYER1_TODO A1)
+# Agent-KB — Neo4j substrate
 # Neo4j 5.26 Community LTS: range + fulltext + vector indexes are all native (vector GA since 5.15).
 # Volume-persisted via named volumes (survive container restart). Bolt 7687, HTTP 7474.
 services:

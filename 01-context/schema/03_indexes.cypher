@@ -1,4 +1,4 @@
-// 03_indexes.cypher — B3-idx (cb-6a1.6). Label LOOKUP index is built-in (SHOW INDEXES lists it).
+// 03_indexes.cypher — B3-idx. Label LOOKUP index is built-in (SHOW INDEXES lists it).
 // RANGE on bi-temporal edge fields (the as-of validity filter, PART 3)
 CREATE RANGE INDEX rel_valid_at IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.valid_at);
 CREATE RANGE INDEX rel_created_at IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.created_at);

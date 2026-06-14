@@ -1,4 +1,4 @@
-"""D1 ETL spine (beads cb-dfv.1): issue-tracker-shaped structured state -> Neo4j via deterministic
+"""D1 ETL spine (the Context-Engineering epic): issue-tracker-shaped structured state -> Neo4j via deterministic
 MERGE / MATCH-SET, per the relations.yaml rules. ZERO LLM (pure neo4j driver, no model calls).
 
 SOURCE = FIXTURE stand-in (live tracker API is down). To go live, replace fetch_source()
@@ -99,6 +99,35 @@ def status_history(tx, key):
     return [(r["o"], r["cur"]) for r in tx.run(
         "MATCH (i:Entity {key:$key})-[r:RELATES_TO {name:'HAS_STATUS'}]->(o) "
         "RETURN o.key AS o, r.invalid_at IS NULL AS cur ORDER BY cur DESC", key=key)]
+
+
+# ---------------------------------------------------------------------------
+# G2 OCR ingestion path (G2) — ADDITIVE, does not touch fetch_source / ingest
+# ---------------------------------------------------------------------------
+
+def ingest_ocr_doc(session, image_path, namespace, key, ep=None):
+    """OCR a rasterized page image and ingest its text as a graph entity.
+
+    Calls ocr_adapter.extract() -> extracted text -> upsert_entity() with
+    long_context=<ocr text>, namespace=<namespace>, key=<key>.
+
+    This function is intentionally isolated from the existing fetch_source / ingest
+    path: it adds ONE entity node per image, does not create any RELATES_TO edges,
+    and can be called from any session without affecting the structured ETL flow.
+
+    Args:
+        session:    open Neo4j driver session (execute_write will be called internally)
+        image_path: absolute path to a rasterized page image
+        namespace:  graph namespace for the new entity (e.g. "engineering")
+        key:        graph key for the new entity (e.g. "doc:ocr-spi-42-scan")
+        ep:         episodic uuid; defaults to f"ocr:{key}"
+    """
+    import ocr_adapter
+    ep = ep or f"ocr:{key}"
+    ocr_text = ocr_adapter.extract(image_path)
+    short = f"OCR document {key}"
+    session.execute_write(lambda tx: upsert_entity(tx, "Document", key, short, ocr_text, ep, ns=namespace))
+    return ocr_text
 
 
 def main():

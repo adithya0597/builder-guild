@@ -1,4 +1,4 @@
-"""H3-instr (beads cb-hjv.1): Phase-A instrumentation — a scoring schema + emission seam that
+"""H3-instr: Phase-A instrumentation — a scoring schema + emission seam that
 logs eval scores for every serve call, with NO behavior change (read-only; the wrapped call's
 output is returned byte-identical). Langfuse is the production online seam (CONTEXT_EVALS §"Langfuse").
 

@@ -1,4 +1,4 @@
-"""FIX-RECON (beads cb-ax8.8): the per-card validity+freshness reconciliation rule, for the
+"""FIX-RECON: the per-card validity+freshness reconciliation rule, for the
 S6 case a served node-card mixes per-NODE freshness (`dirty`) with per-EDGE validity
 (`superseded`) — e.g. a clean node carrying one superseded fact among five current.
 

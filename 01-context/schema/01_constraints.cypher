@@ -1,4 +1,4 @@
-// 01_constraints.cypher — B1-onto (cb-6a1.3): node-key uniqueness.
+// 01_constraints.cypher — B1-onto: node-key uniqueness.
 // Neo4j Community: REQUIRE ... IS UNIQUE only (IS NODE KEY + existence are Enterprise).
 // Internal identities
 CREATE CONSTRAINT entity_uuid IF NOT EXISTS FOR (n:Entity) REQUIRE n.uuid IS UNIQUE;

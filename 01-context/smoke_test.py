@@ -1,4 +1,4 @@
-"""A2 (cb-6a1.2) smoke test: neo4j-graphrag-python client connects + write + read-back."""
+"""A2 smoke test: neo4j-graphrag-python client connects + write + read-back."""
 from neo4j import GraphDatabase  # bundled by neo4j-graphrag-python
 
 URI = "bolt://localhost:7687"

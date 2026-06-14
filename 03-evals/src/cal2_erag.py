@@ -1,4 +1,4 @@
-"""CAL-2 (beads cb-hjv.3.3.2): REAL eRAG source weights over the validated golden set.
+"""CAL-2: REAL eRAG source weights over the validated golden set.
 
 eRAG protocol (CONTEXT_EVALS §0/§2): each retrieved unit's value = how well that unit ALONE answers
 the query vs ground truth — downstream utility, not relevance. Per the locked deterministic-first

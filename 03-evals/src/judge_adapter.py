@@ -1,4 +1,4 @@
-"""CAL-1 (beads cb-hjv.3.3.1): the REAL judge adapter — an external judge CLI (env JUDGE_CMD/JUDGE_MODEL).
+"""CAL-1: the REAL judge adapter — an external judge CLI (env JUDGE_CMD/JUDGE_MODEL).
 
 Wraps one-shot `$JUDGE_CMD -z <prompt> -m $JUDGE_MODEL` as the non-self-family judge for the V0 calibration.
 Strict-JSON prompts, parse-with-retry + exponential backoff, EVERY verdict checkpointed to disk

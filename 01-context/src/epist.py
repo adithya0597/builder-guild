@@ -1,4 +1,4 @@
-"""EPIST (beads cb-ax8.5): multi-source epistemics — weight sources by epistemic role, then
+"""EPIST: multi-source epistemics — weight sources by epistemic role, then
 resolve cross-source conflicts STRUCTURALLY (by authority + bi-temporal validity, no LLM),
 per HYBRID_RETRIEVAL_ARCHITECTURE PART 4.
 

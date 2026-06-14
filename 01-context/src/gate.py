@@ -1,4 +1,4 @@
-"""GATE (beads cb-ax8.7): faithfulness + APC decision/action gate -> pass | partial | abstain |
+"""GATE: faithfulness + APC decision/action gate -> pass | partial | abstain |
 escalate. Ports the ai-product-council governance engine (VoteCalculator / DecisionRouter /
 SycophancyDetector — "pure logic, zero model deps") per HYBRID_RETRIEVAL_ARCHITECTURE §4.
 

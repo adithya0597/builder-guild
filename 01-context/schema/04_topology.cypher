@@ -1,4 +1,4 @@
-// 04_topology.cypher — C1-topo (cb-6a1.7). Canonical sample exercising all 5 elements.
+// 04_topology.cypher — C1-topo. Canonical sample exercising all 5 elements.
 // ONE statement so vars stay bound. NOTE: never put a null prop in a MERGE pattern (Neo4j rejects it);
 // "current fact" => invalid_at/expired_at are ABSENT (= null), set the rest via SET.
 MERGE (e1:Episodic {uuid:'ep-001'}) SET e1.created_at=datetime(), e1.valid_at=datetime(), e1.namespace='engineering'

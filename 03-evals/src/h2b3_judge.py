@@ -1,6 +1,6 @@
-"""H2b-3 (beads cb-hjv.3.2): the DEBIASED-judge harness + drift-τ calibration. CODE ONLY, demoed
+"""H2b-3: the DEBIASED-judge harness + drift-τ calibration. CODE ONLY, demoed
 with a MOCK biased judge (no paid calls). The real sweep (a non-self-family LLM judge over the
-validated golden set) is the SPEND GATE H2b-5 (cb-hjv.3.3).
+validated golden set) is the SPEND GATE H2b-5.
 
 The §0 debiasing mandate (CONTEXT_EVALS §0, arxiv 2506.06331 / 2306.05685): a naive LLM judge is
 corrupted by position bias (>30% win-rate swing on order swap), length bias (a 25-token gap swings

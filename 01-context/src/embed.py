@@ -1,4 +1,4 @@
-"""D3-embed (beads cb-dfv.3): embed intrinsic node content with local EmbeddingGemma-300M ($0,
+"""D3-embed (the Context-Engineering epic): embed intrinsic node content with local EmbeddingGemma-300M ($0,
 768-dim, matches the node_embedding vector index) and dual-chunk by content kind:
   prose -> contextual windows (overlapping sentence groups)
   code  -> AST chunks (one per top-level def / class)

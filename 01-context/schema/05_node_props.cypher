@@ -1,4 +1,4 @@
-// 05_node_props.cypher — C2-props (cb-6a1.8). A well-formed structured node (no pageindex_ref)
+// 05_node_props.cypher — C2-props. A well-formed structured node (no pageindex_ref)
 // and a long-doc node (with pageindex_ref). One statement; nulls absent, not in MERGE pattern.
 MERGE (i:Entity:Issue {key:'issue:cb:42'})
   SET i.uuid='u-issue-42', i.namespace='engineering',

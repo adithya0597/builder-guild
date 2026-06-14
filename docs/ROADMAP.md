@@ -3,6 +3,21 @@
 Ordered by what the last calibration run proved is missing (see
 `03-evals/CASE_STUDY_calibration.md`). Each item states its acceptance test.
 
+## Status (2026-06-14)
+
+RAG-pattern coverage (see `01-context/RETRIEVAL.md` + `HYBRID_RETRIEVAL_ARCHITECTURE.md`):
+- **Hybrid RAG** — ✅ shipped (keyword + graph + vector ladder, RRF fusion).
+- **GraphRAG** — ✅ shipped; the community-summaries gap is closed (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven).
+- **Corrective RAG** — ✅ shipped; the recovery half is closed (`01-context/src/corrective.py`, bounded rewrite→re-retrieve + $0-or-STOP web fallback).
+- **Agentic RAG** — ◐ PARTIAL (mechanism only) → gap **G1** below.
+- **Multimodal RAG** — ✗ NOT built (text-only) → gap **G2** below.
+
+**Gate state: suggest-only.** `01-context/src/abstain.py` has `CALIBRATED=False` with provisional
+weights, so every decision routes to a human — autonomy is not leased. The last calibration run
+(the private spine, 2026-06-12 — *last-measured, not re-run since*) reported judge κ=1.0 but a
+FAILED coverage gate (sufficiency refit weight positive yet selective gain −3.0pp), so the gate
+correctly refuses to certify → trust track **G3** below.
+
 ## Near
 
 1. **Temporal-evidence layer.** `valid_from`/`valid_to` event history + an as-of query path, so
@@ -36,6 +51,43 @@ Ordered by what the last calibration run proved is missing (see
    action-audit loop attributing outcomes per acting agent.
 9. **Long-doc navigation rung** (ToC-guided section retrieval) behind the eval gate, scoped by
    the graph — pilot design in `01-context/PAGEINDEX_PILOT.md`.
+
+## Gaps to close next — fresh-session entry points
+
+The three named gaps from the 2026-06-14 status review, written so a cold session can pick one up.
+Each says where to start. G3 is the existing items 2→5 in dependency order (framed, not duplicated).
+
+### G1 — Agentic RAG: the autonomous planner-loop (mechanism shipped, policy deferred)
+Today the retrieve-decision is bounded + mechanical: rung escalation (`ladder.py`) + the corrective
+rewrite loop (`corrective.py`). The Agentic-RAG pattern is a *planner* that decides **what** to
+retrieve, **when**, and **from where**, looping until confident — the policy was deliberately
+deferred (mechanism exists, autonomy of the loop does not). Distinct from item 8 (fleet/multi-agent
+coordination); G1 is one agent choosing its own retrieval strategy.
+*Start:* `02-agents/AGENT_ARCHITECTURE.md` §5 (`demo_agent`) + `01-context/src/corrective.py`.
+*Accept:* a planner answers a multi-step question by issuing ≥2 distinct retrievals it chose itself
+(not the fixed ladder), terminates on a confidence/abstain signal (bounded — no unbounded loop),
+and the trace shows each decision point. Stays $0/local + namespace-scoped (isolation self-check clean).
+
+### G2 — Multimodal RAG (OCR-first, NOT vision-default)
+Not built; text-only. When built, default to an **OCR pipeline (or hybrid), NOT ColPali/vision** —
+`arXiv:2505.05666` found OCR beats ColPali in *all* evaluated settings (L0 MRR .5151 vs .2971);
+vision wins only when fine-tuned on target data, and CLIP/ColPali would break the $0/local simplicity.
+*Start:* a pluggable OCR adapter (env-generic, mirrors `03-evals/src/judge_adapter.py`) that feeds
+text into the existing ladder; keep it behind the eval gate.
+*Accept:* a PDF-with-diagram doc is indexed via OCR and retrieved through the existing
+namespace-scoped ladder; an A/B vs a vision baseline is *measured* (not assumed); $0/local default holds.
+
+### G3 — Calibration / autonomy: the trust track (BLOCKS the autonomy lease)
+The gate is suggest-only because the last run FAILED its coverage gate and the sufficiency proxy
+fitted with a **negative** weight (a broken signal). This is items **2 → 3 → 4 → 5** in dependency
+order: (2) a *real* sufficiency signal → (3) decision-channel golden scoring → (4) golden-set v1 for
+a *measurable* κ → (5) the reversible per-namespace autonomy lease. Until 2–4 land, `CALIBRATED`
+stays False **by design** (refusing to certify is a success mode, not a bug).
+*Start:* re-run the sweep for a *current* reading (`03-evals/src/cal3_fit.py` + `cal4_sweep.py`),
+then `03-evals/CASE_STUDY_calibration.md`.
+*Accept:* sufficiency refits **positive** with a selective-accuracy gain over the confidence-only
+baseline; κ ≥ 0.8 with a CI excluding 0.6 on golden v1; then exactly one namespace flips to
+autonomous via the reversible lease (item 5) and the regression stays green.
 
 Non-goals: prompt-time conflict resolution (conflicts resolve structurally in the store);
 relevance-tuned retrieval (sources are weighted by downstream utility, not similarity); any
@@ -75,6 +127,6 @@ from "hobby-grade" into "evidence-backed." *Accept:* every cited limit in `01-co
   (Los Alamos). <https://arxiv.org/abs/2505.05666> → corrects the multimodal default: OCR beats
   ColPali in all evaluated settings (L0 MRR .5151 vs .2971); go OCR/hybrid, **not** vision-default.
 
-> Provenance: distilled from `company-brain/research/RAG_PATTERNS_AND_PAPERS_FOR_BUILDER_GUILD.md`
+> Provenance: distilled from internal research notes.
 > (Part B verified-from-source, 2026-06-13). All six fetched from canonical URLs after an earlier
 > title-card-only pass was caught and corrected (see that doc's Part F).

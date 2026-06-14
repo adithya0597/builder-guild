@@ -211,7 +211,7 @@ RETURN e.uuid, e.fact_rev ORDER BY e.fact_rev DESC;   // feed to lazy re-embed/r
 Normalize → **RRF** `score(d)=Σ 1/(k+rank)`, **k=60** (Cormack & Clarke SIGIR 2009; rank-based = scale-free, solves BM25-vs-cosine normalization) → **cross-encoder rerank** (bge-reranker-v2 / Qwen3-reranker / Cohere class; +11% nDCG BEIR; runs whenever ≥2 methods fire; latency-budgeted in §5) → source-diversity. Pure structural (method 1 only) skips fusion.
 Evidence schema (at ingest, every candidate): `evidence_id · source_id · source_path · source_type · node_id · chunk_span · retrieved_at · valid_at · invalid_at · created_at · expired_at · freshness_state · namespace · retrieval_method · raw_score · retrieval_score`.
 
-> **Naming convention (FIX-RECON / S6 — "confidence" disambiguated).** Bare `confidence` previously named three distinct quantities across layers; they are now always qualified (codified in `company-brain/reconcile.py:RECALL_NAMING`):
+> **Naming convention (FIX-RECON / S6 — "confidence" disambiguated).** Bare `confidence` previously named three distinct quantities across layers; they are now always qualified (codified in `01-context/src/reconcile.py:RECALL_NAMING`):
 > - **`retrieval_score`** — evidence relevance from the retriever (calibrated, vs the uncalibrated `raw_score`). *Was the evidence-schema `confidence` field above.*
 > - **`generator_self_confidence`** — the model's stated confidence in its own generation (the `DecisionRouter` `≥70` gate, `VoteCalculator` `/100`).
 > - **`claim_faithfulness`** — per-claim support-by-evidence (the §4 faithfulness score).
@@ -285,7 +285,41 @@ Shared state: `query_id · route · role · namespace_policy · freshness_sla ·
 
 ---
 
-## GraphRAG community summaries — closed gap vs Microsoft GraphRAG (cb-k97.2)
+## Multimodal RAG — OCR-first design choice (G2)
+
+**Source:** Most et al., "Lost in OCR Translation? Vision-Based Approaches to Robust Document
+Retrieval", arXiv 2505.05666 (2025). The abstract-supported claim: **OCR-based retrieval generalizes
+better to unseen / varying-quality documents, while vision-native (ColPali) does well on
+in-domain / fine-tuned documents.** For a heterogeneous, mostly-unseen company document mix,
+that generalization edge → **default to OCR-first**; reach for vision-native only with a
+fine-tuned in-domain corpus. (NOT a blanket "OCR wins everywhere" claim.)
+
+**What this means for PART 1 (context engineering) — rasterised documents:**
+Scanned PDFs / photographed pages arrive as images. The retrieval-architecture choice is:
+
+| Option | Mechanism | When it wins (per 2505.05666 + this stack's $0/local rationale) |
+|---|---|---|
+| **OCR-first (DEFAULT)** | tesseract → text → `long_context` → existing embed→vector path | General/unseen/varying-quality docs (paper: OCR generalizes better); also $0/local + reuses the text ladder with no new retrieval machinery |
+| Vision-native (ColPali / CLIP) | image-embedding directly, bypasses the text graph | In-domain / fine-tuned corpora (paper: vision-native does well there); no structural-edge support; not $0/local |
+
+**Integration (the $0/local + reuse rationale):** OCR text lands in `long_context` exactly like any
+other node description. The full pipeline — `embed.py` (EmbeddingGemma-300M, 768-dim),
+`ladder.vector_rung()`, `serve.py` fusion/gate, namespace isolation — runs **unchanged**. The only
+new seam is the OCR ingestion path (`01-context/src/ocr_adapter.py`, `etl.ingest_ocr_doc()`), which
+sits upstream of `upsert_entity()`. Acceptance (`03-evals/src/eval_ocr.py`) proves this end-to-end:
+T4 ingests an OCR'd page into the engineering namespace and shows `serve("engineering")` retrieves
+it through its own ladder while `serve("finance")` does not (cross-role isolation).
+
+**Born-digital PDFs:** poppler/pdf2image (rasterise PDF pages to PNG, then OCR) is the
+documented add-on. Not installed by default ($0/offline constraint); add when needed.
+
+**Depth label: LABELED-ESTIMATE (abstract-level; full results table not walked).** The
+generalization-vs-in-domain direction is the load-bearing claim; specific per-benchmark margins
+are deliberately not quoted here — re-verify against the paper before citing numbers.
+
+---
+
+## GraphRAG community summaries — closed gap vs Microsoft GraphRAG (GraphRAG communities)
 
 **The gap (from rev 4 paper-walk):** Microsoft GraphRAG (2404.16130) wins on comprehensiveness and
 diversity by running Leiden community detection over the full graph, then generating per-community
@@ -294,7 +328,7 @@ traversal that GraphRAG lacks — but we had no community-level summaries, so lo
 questions (spanning many nodes without a clear structural path) had no summary target to retrieve
 against. This was the named gap: "GraphRAG-style community sensemaking" absent from our stack.
 
-**What cb-k97.2 delivers:**
+**What GraphRAG communities delivers:**
 
 | Component | What it does |
 |---|---|
@@ -310,9 +344,9 @@ This is stronger than a read-time filter that might be forgotten.
 
 **What we still lack vs Microsoft GraphRAG:** LLM-built graphs from unstructured text (theirs
 does LLM extraction; ours is hand-defined ontology + structured ETL). For sensemaking over
-free-text corpora their approach is better; for structured company-brain KB with deterministic
+free-text corpora their approach is better; for structured KB with deterministic
 ontology ours is more faithful and $0 on graph-building.
 
-**Implemented:** 2026-06-14, cb-k97.2. Demo: `communities.py demo()` prints `COMMUNITIES_OK`
-against the live cb-neo4j ACME graph. Acceptance: T1–T7 (spec §5) all pass.
-Unblocks: cb-t0m.3 (community refresh).
+**Implemented:** 2026-06-14, GraphRAG communities. Demo: `communities.py demo()` prints `COMMUNITIES_OK`
+against the local Neo4j ACME graph. Acceptance: T1–T7 (spec §5) all pass.
+Unblocks: the Freshness epic (community refresh).

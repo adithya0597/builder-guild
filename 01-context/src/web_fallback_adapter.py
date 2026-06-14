@@ -1,4 +1,4 @@
-"""Corrective-RAG web fallback adapter (beads cb-k97.1 §5).
+"""Corrective-RAG web fallback adapter (Corrective-RAG §5).
 
 Pluggable $0-or-STOP web branch. OFF by default. Mirrors judge_adapter.py.
 
@@ -27,13 +27,13 @@ import subprocess
 import time
 
 # Broadened to fail-closed on ANY auth/key/payment/billing/quota signal — better to STOP
-# too eagerly than to silently pay (codex review cb-k97.1: missed "authentication required",
+# too eagerly than to silently pay (codex review Corrective-RAG: missed "authentication required",
 # "quota reached"). "auth" also covers authentication/authorization/unauthorized.
 _AUTH_RE = re.compile(r"auth|api[ _-]?key|payment|billing|quota", re.I)
 
 # Env (CORRECTIVE_WEB_CMD / CORRECTIVE_WEB_MODEL) is read at CALL TIME inside _call(), never at
 # import — the adapter is documented as env-driven, so import-time capture would freeze it stale
-# and force tests to importlib.reload() (codex review cb-k97.1 HIGH-2).
+# and force tests to importlib.reload() (codex review Corrective-RAG HIGH-2).
 
 
 def is_enabled():

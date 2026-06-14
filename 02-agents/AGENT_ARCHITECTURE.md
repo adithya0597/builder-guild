@@ -40,14 +40,21 @@ to a namespace. Two seats deserve special care:
 ## 3. Autonomy is leased, never granted
 
 The action gate (`01-context/src/abstain.py`) runs sufficiency × confidence and is **suggest-only
-until calibrated**:
+until calibrated**. `CALIBRATED` is a **per-namespace dict** (never a scalar boolean) — the lease
+is granted and revoked one namespace at a time, and the gate reads `CALIBRATED.get(role, False)`:
 
 ```
-CALIBRATED=False  ->  mode="suggest": even a "pass" decision routes to a human; execute() blocks.
-CALIBRATED=True   ->  mode="autonomous": "pass" decisions may execute, for that namespace only.
+CALIBRATED = {"engineering": False, "finance": False, "operations": False,
+              "product": False, "market": False, "governance": False, "shared": False}
+
+CALIBRATED.get(role) is False  ->  mode="suggest":    even a "pass" routes to a human; execute() blocks.
+CALIBRATED.get(role) is True   ->  mode="autonomous": "pass" decisions may execute, for THAT namespace only.
 ```
 
-The flip is **not a code event** — it is a governance decision taken on an evidence packet
+A namespace flips to `True` only by a human governance decision — `auto_revert(role, kappa, gain)`
+is the only programmatic mutator and is **revoke-only** (it can set a namespace back to `False`
+when κ or gain drops below bar; it can never grant autonomy). The grant is **not a code event** —
+it is a governance decision taken on an evidence packet
 (calibrated weights, judge-agreement κ with confidence intervals, selective-accuracy gain vs a
 confidence-only baseline, isolation status). Design rules proven out by the first calibration run
 (see `03-evals/CASE_STUDY_calibration.md`):

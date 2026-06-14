@@ -1,4 +1,4 @@
-"""eval_corrective.py — acceptance tests for the Corrective-RAG loop (beads cb-k97.1 §6).
+"""eval_corrective.py — acceptance tests for the Corrective-RAG loop (Corrective-RAG §6).
 
 Tests:
     T1  flip:          weak-phrasing query initially abstains -> after a rewrite -> pass
@@ -12,7 +12,7 @@ Tests:
 
 Prints CORRECTIVE_OK iff all six pass. sys.exit(1) on any failure.
 
-T1 golden case (real seeded ACME data, verified against cb-neo4j 2026-06-14):
+T1 golden case (real seeded ACME data, verified against the local Neo4j graph 2026-06-14):
     query = "SPI-3 blocking SPI-6"  role = "engineering"
     Initial call:
         keyword_rung: [issue:SPI-3, issue:SPI-6] (sorted)
@@ -25,7 +25,7 @@ T1 golden case (real seeded ACME data, verified against cb-neo4j 2026-06-14):
         primary = issue:SPI-3  (has ASSIGNED_TO -> agent:cto -> SUPPORTED -> pass)
     resolved_at = "rewrite:id_extract"  decision = "pass"
 
-    Verified live on cb-neo4j ACME graph.
+    Verified live on the local Neo4j ACME graph.
 """
 import os
 import sys
@@ -66,7 +66,7 @@ def t1_flip():
     Re-serves with query='SPI-3 SPI-6', pattern=None.
     primary=issue:SPI-3 (has ASSIGNED_TO -> agent:cto -> pass).
 
-    Verified live on cb-neo4j ACME graph 2026-06-14.
+    Verified live on the local Neo4j ACME graph 2026-06-14.
     """
     # Use max_rewrites=3 so multiple tactics can fire if needed
     r = corrective_serve("SPI-3 blocking SPI-6", "engineering", max_rewrites=3)
@@ -86,7 +86,7 @@ def t1_flip():
         f"Attempted: {c['attempted']}"
     )
 
-    # Final decision must be 'pass' — the spec's abstain->pass flip (codex review cb-k97.1:
+    # Final decision must be 'pass' — the spec's abstain->pass flip (codex review Corrective-RAG:
     # accepting 'partial' lets T1 pass without proving the advertised golden case).
     assert r.get("decision") == "pass", (
         f"T1: final decision must be 'pass' (the abstain->pass flip), got {r.get('decision')!r}"
@@ -198,7 +198,7 @@ def t4_isolation():
         )
 
     # Independently PROVE the per-iteration guard actually fires: inject a stub _serve returning an
-    # UNCLEAN isolation trace and assert corrective_serve raises (codex review cb-k97.1: T4 must
+    # UNCLEAN isolation trace and assert corrective_serve raises (codex review Corrective-RAG: T4 must
     # test the guard, not rely on it implicitly).
     def _unclean_serve(qt, role, pattern=None, action=None):
         return {"decision": "abstain", "primary": "issue:LEAK",
@@ -221,7 +221,7 @@ def t4_isolation():
 def t5_web_stop():
     """Table-test: ANY auth/payment/billing/quota signal in web CLI output -> RuntimeError.
     Stubs subprocess.run directly — standalone (no Neo4j) and no importlib.reload, since the
-    adapter now reads env at call time (codex review cb-k97.1: one literal phrase + reload was
+    adapter now reads env at call time (codex review Corrective-RAG: one literal phrase + reload was
     too weak and papered over the import-time env bug).
     """
     import web_fallback_adapter as wfa
@@ -304,7 +304,7 @@ def t6_web_off_default():
 def t7_web_regrade_segregated():
     """When web fallback IS enabled and returns facts, they are SEGREGATED into web_advisory
     (never presentable_facts/composed_evidence) and the decision comes from a RE-GRADE — so an
-    external string cannot masquerade as in-scope graph evidence (codex review cb-k97.1 HIGH-1).
+    external string cannot masquerade as in-scope graph evidence (codex review Corrective-RAG HIGH-1).
     Standalone: stubs both the adapter and _serve (no Neo4j)."""
     import web_fallback_adapter as wfa
     orig_enabled, orig_fetch = wfa.is_enabled, wfa.fetch
@@ -330,7 +330,7 @@ def t7_web_regrade_segregated():
     assert "agent:cto" not in joined, "T7: web fact LEAKED into in-scope graph evidence"
     # External-only evidence on a routine reversible action must ABSTAIN (not pass, not partial):
     # unsupported-by-graph external facts route through the faithfulness gate as advisory-only
-    # (codex review cb-k97.1 iter2 LOW: assert the real outcome, not just != pass — the prior
+    # (codex review Corrective-RAG iter2 LOW: assert the real outcome, not just != pass — the prior
     # always-'partial' re-grade would have slipped past a != 'pass' check).
     assert r.get("decision") == "abstain", (
         f"T7: external-only evidence (routine reversible) must abstain, got {r.get('decision')!r}"

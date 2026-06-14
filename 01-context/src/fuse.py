@@ -1,4 +1,4 @@
-"""FUSE (beads cb-ax8.4): RRF (k=60) fusion + cross-encoder rerank across the 3 retrieval
+"""FUSE: RRF (k=60) fusion + cross-encoder rerank across the 3 retrieval
 sources (graph index / vector recall / PageIndex), per HYBRID_RETRIEVAL_ARCHITECTURE §3.
 
 Stage 1 — RRF: rank-based, scale-free fusion that sidesteps BM25-vs-cosine score normalization

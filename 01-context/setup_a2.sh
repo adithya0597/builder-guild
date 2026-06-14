@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A2 (cb-6a1.2): dedicated venv + neo4j-graphrag-python + smoke-test write/read.
+# A2: dedicated venv + neo4j-graphrag-python + smoke-test write/read.
 set -uo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 [ -d .venv ] || python3 -m venv .venv

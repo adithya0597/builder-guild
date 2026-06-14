@@ -1,4 +1,4 @@
-// FIX-NS (cb-6a1.5) demo: namespace on node AND edge enforces role isolation.
+// FIX-NS demo: namespace on node AND edge enforces role isolation.
 // ONE statement (no intermediate ;) so node vars stay bound for the edge MERGEs.
 MERGE (b:Entity:Agent {key:'agent:cto'})            SET b.namespace='engineering'
 MERGE (a:Entity:Repo {key:'repo:acme/api'})         SET a.namespace='engineering'

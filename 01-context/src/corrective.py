@@ -1,4 +1,4 @@
-"""Corrective-RAG recovery loop (beads cb-k97.1).
+"""Corrective-RAG recovery loop.
 
 Wraps serve.serve(): grade -> if abstain, rewrite the query + re-retrieve (bounded)
 -> optional web fallback. Pure-python deterministic rewrites, $0/local. No model calls.
@@ -85,7 +85,7 @@ def _split_ids_by_verb(text, verb_tok, ids):
     """Partition extracted ids into (after_verb, before_verb) by the verb token's char position.
     graph_rung matches (subj)-[rel]->(obj {key}) and returns subjects, so the relation's OBJECT is
     conventionally the id AFTER the verb ("X blocks Y" -> obj=Y). Callers try after-verb ids first
-    (codex review cb-k97.1: don't blindly try the subject as the object)."""
+    (codex review Corrective-RAG: don't blindly try the subject as the object)."""
     if not verb_tok:
         return list(ids), []
     vpos = text.lower().find(verb_tok.lower())
@@ -114,7 +114,7 @@ def _build_rewrites(query_text, pattern, prior_result):
     # reverse: having SPI-X in the original query text re-introduces the trap).
     rel, verb_tok = _extract_verb_rel(query_text or "")
     if rel:
-        # Positional subject/object inference (codex review cb-k97.1): the relation's OBJECT is the
+        # Positional subject/object inference (codex review Corrective-RAG): the relation's OBJECT is the
         # id AFTER the verb. Try after-verb ids first, before-verb as fallback. Skip if no ids (an
         # empty-obj pattern never matches and would just waste a probe against max_rewrites).
         ids = _extract_ids(query_text or "")
@@ -198,7 +198,7 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
 
     # Union evidence across all probes — same role on every probe, so the union stays in-scope.
     # Lets answers that need evidence combined across decompose sub-queries surface even when no
-    # single probe passes (codex review cb-k97.1: decompose must union, not first-hit-wins).
+    # single probe passes (codex review Corrective-RAG: decompose must union, not first-hit-wins).
     union_facts = list(result.get("presentable_facts") or [])
     union_evidence = list(result.get("composed_evidence") or [])
 
@@ -266,7 +266,7 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
         prior_result = candidate
 
     # Web fallback (spec §5): only when web_fallback=True AND env CORRECTIVE_WEB_ENABLED=true.
-    # CRITICAL (codex review cb-k97.1 HIGH-1): external web facts have NO namespace, so they are
+    # CRITICAL (codex review Corrective-RAG HIGH-1): external web facts have NO namespace, so they are
     # NEVER merged into the role-scoped graph answer (presentable_facts/composed_evidence stay
     # graph-only). They are segregated into web_advisory (tagged external) and RE-GRADED through the
     # same gate, so the decision is honest and an out-of-namespace string can never masquerade as
@@ -281,7 +281,7 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
                 # External web facts have NO in-graph support -> UNSUPPORTED under the faithfulness
                 # contract. Re-grade through the SAME gate: routine reversible -> abstain, risky ->
                 # escalate. External evidence is advisory; it NEVER autonomously resolves an in-scope
-                # query. (codex review cb-k97.1 iter2: a PARTIAL re-grade was hollow — stage_a_decision
+                # query. (codex review Corrective-RAG iter2: a PARTIAL re-grade was hollow — stage_a_decision
                 # short-circuits PARTIAL to 'partial' BEFORE the sufficiency x confidence logistic, so
                 # supplied suf/conf were dead. UNSUPPORTED routes through the faithfulness gate, which
                 # decides by reversibility — suf/conf are correctly irrelevant on this path.)

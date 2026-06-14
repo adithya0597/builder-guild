@@ -1,5 +1,5 @@
 // 06_community.cypher — canonical sample: :Community node + :IN_COMMUNITY edge, namespace-stamped.
-// Per cb-k97.2 (GraphRAG community summaries). Derived artifact — per-namespace only (ONTOLOGY §7 §12).
+// Per GraphRAG community summaries. Derived artifact — per-namespace only (ONTOLOGY §7 §12).
 //
 // CYPHER SAFETY (ONTOLOGY §8 §10):
 //   - No null property in MERGE pattern (nullable fields set via SET only).

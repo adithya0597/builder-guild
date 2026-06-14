@@ -68,7 +68,36 @@ The retrieval question for *memory across sessions*. Benchmark = **LOCOMO** ([24
 - MTEB v1 vs v2 not comparable. Community signal = sentiment, direction only.
 - Companion: `MODEL_ROUTING.md`. Community raw: `~/Documents/Last30Days/rag-retrieval-failure-for-ai-agents-raw-v3.md`.
 
-## Corrective RAG — bounded rewrite→re-retrieve loop (cb-k97.1)
+## Multimodal RAG — OCR-first (G2)
+
+**Design choice: default to OCR-first for general document ingestion.**
+
+Per Most et al., "Lost in OCR Translation? Vision-Based Approaches to Robust Document Retrieval",
+arXiv 2505.05666 (2025): **OCR-based retrieval generalizes better to unseen / varying-quality
+documents, while vision-native (ColPali) does well on in-domain / fine-tuned documents.** Because
+a company brain ingests a wide, heterogeneous, mostly-unseen document mix (scans, exports, mixed
+quality), the generalization edge points to **OCR-first as the default**; vision-native is the
+specialized choice when you have fine-tuned on a known in-domain corpus.
+
+This is reinforced by an engineering rationale independent of the paper: OCR-first is **$0/local**
+(tesseract CLI, no model download) and **reuses the existing text ladder** — OCR text lands in
+`long_context` and flows through embed → vector-rung → serve **unchanged**, so no new retrieval
+machinery is introduced. The only new seam is the OCR ingestion path (`ocr_adapter.py` +
+`etl.ingest_ocr_doc()`). Vision encoders (CLIP/ColPali) remain available as an optional baseline
+but are NOT the default retrieval path.
+
+**Implementation:** `01-context/src/ocr_adapter.py` (tesseract CLI, $0/local, env-at-call-time,
+local-by-default with a $0-or-STOP regex backstop) + `etl.ingest_ocr_doc()` (additive, isolated
+from the structured ETL path). Acceptance: `03-evals/src/eval_ocr.py` (T1-T4; T4 runs the real
+serve() + cross-role isolation; the A/B is an honest smoke check, not a comparison).
+
+Depth: **abstract-level** — paper read at title/abstract; the generalization-vs-in-domain claim is
+the abstract-supported framing. **LABELED-ESTIMATE (abstract-level; full results table not walked):**
+any specific per-benchmark MRR/nDCG margins are not cited here because the results tables were not
+walked; treat the directional claim (OCR generalizes better; vision-native wins in-domain) as the
+load-bearing one, and re-verify exact numbers against the paper before quoting them.
+
+## Corrective RAG — bounded rewrite→re-retrieve loop (Corrective-RAG)
 
 Implementation of CRAG [2401.15884] at the serve layer. When `abstain` is returned by the grader,
 `corrective_serve()` (in `01-context/src/corrective.py`) rewrites the query deterministically

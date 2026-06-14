@@ -1,4 +1,4 @@
-"""F3-scope (beads cb-ax8.2): 2-D scoping = role-axis (CXO namespace slice) x query-axis, with a
+"""F3-scope: 2-D scoping = role-axis (CXO namespace slice) x query-axis, with a
 per-role token budget and a T-cap (top-K results, start 3). This is the isolation boundary the
 serve orchestrator applies before any retrieval — a role can only ever see its own namespace
 slice + 'shared'. Deterministic; no LLM.
