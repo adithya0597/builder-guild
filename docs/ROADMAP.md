@@ -89,6 +89,11 @@ then `03-evals/CASE_STUDY_calibration.md`.
 baseline; κ ≥ 0.8 with a CI excluding 0.6 on golden v1; then exactly one namespace flips to
 autonomous via the reversible lease (item 5) and the regression stays green.
 
+**Autonomy boundary (by design):** when a namespace is leased, autonomous action is restricted to
+*edge-validated* answers (a presentable graph edge whose relation matches the query's intent);
+correctly-answered-but-text-only facts (status is the canonical case) stay suggest-only — correctness
+is necessary but not sufficient for action. See `03-evals/CASE_STUDY_calibration.md`.
+
 Non-goals: prompt-time conflict resolution (conflicts resolve structurally in the store);
 relevance-tuned retrieval (sources are weighted by downstream utility, not similarity); any
 autonomy flip without a human reading the evidence packet.

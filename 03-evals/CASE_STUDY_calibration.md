@@ -76,6 +76,44 @@ golden item stays red until it exists.
 The pattern to copy is the ratchet: **measure → refuse → fix → re-measure**, with every refusal
 recorded as precisely as every pass.
 
+## The autonomy boundary — correct is not the same as safe to act
+
+The refusals above were about *whether to certify a gate*. A narrower question follows: once a
+namespace is calibrated, **which answers may it act on autonomously?** The naive answer — "any answer
+the gate passes" — is wrong, and the reason is worth recording as its own refusal.
+
+Take a status question: *"what is the status of ACME-7?"* The status value (`todo`, `in_progress`,
+`blocked`, …) is present in the node's content and is answered **correctly**. But it lives in node
+**text**, not as a validated graph **edge** — there is no structural object the system can point to and
+say "this answer is backed by *that* relationship."
+
+A natural next step is to promote status to a first-class edge (an issue→status relationship) so a calibrated
+namespace could act on it. Adversarial review found the disqualifier: **intent disambiguation by
+lexical rule is too fragile to gate an autonomous action.** `blocked` is both a *status value* and a
+near-neighbour of the `BLOCKS` *relation* — "is ACME-7 blocked?" and "what blocks ACME-7?" are
+different questions that surface patterns conflate. It is the same lexical-semantic trap the keyword-ID
+rung fixed for *retrieval*, reappearing for *intent* — but here it would gate an **action**, not just a
+fetch. A rule that occasionally routes a status query to a dependency relation is a tolerable retrieval
+miss and an intolerable basis for autonomy.
+
+The conclusion is a boundary principle:
+
+> **Autonomy is bounded to evidence the system can structurally validate** — an answer backed by a
+> presentable graph edge whose relation matches the query's intent. Correctly-answered-but-text-only
+> facts (status is the canonical case) stay **suggest-only**, even when the answer is right.
+> *Correctness is necessary for action; it is not sufficient.*
+
+So status stayed suggest-only — the same ratchet (**measure → refuse → record**) applied to a
+*capability* instead of a *gate*: a feature that worked, declined because its evidence type did not
+clear the bar for autonomous action.
+
+**What this section claims — and refuses to claim.** It records a *design boundary*, not a shipped
+feature. The gate here is suggest-only by default (`abstain.CALIBRATED` defaults every role to `False`),
+so this is the *intended* autonomy policy — the public example demonstrates refusal mechanics and lease
+prerequisites, not a production autonomy policy. Whether a richer intent signal (a classifier over the
+query, rather than lexical rules) could later lift status into the edge-validated class is left open;
+the bar it must clear is the one this refusal set.
+
 ## Corrective RAG — we detect weak retrieval AND fix it (Corrective-RAG)
 
 The calibration run exposed a second gap beyond answer-shape: **weak queries abstain when the right
