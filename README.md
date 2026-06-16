@@ -73,6 +73,35 @@ This repo's evaluation layer caught its own system twice:
 Both are documented with numbers in the [calibration case study](03-evals/CASE_STUDY_calibration.md).
 That discipline — measure, refuse, fix, re-measure — is the product.
 
+## Founder gate: mechanism is public, trust grant is manual
+
+The repo ships the abstain mechanism and the enforcement boundary, not an automatic path to
+agent autonomy.
+
+- `01-context/src/abstain.py` keeps `CALIBRATED` as a per-role lease dict, defaulting every role to
+  `False`.
+- `abstain_gate()` computes the selective score from **sufficiency × self-confidence**. The shipped
+  weights are provisional placeholders until a real fit is run.
+- `execute()` is the real guardrail: while a role is uncalibrated, even a `pass` result is blocked
+  and routed to a human. "Suggest-only" is enforced behavior, not metadata.
+- `auto_revert()` is **revoke-only**. Bad evidence can flip a role from `True` back to `False`, but
+  no production function grants `True`.
+
+That creates an intentional asymmetry: code can revoke autonomy, never grant it.
+
+The grant path lives in the founder review flow under `03-evals/`:
+
+1. Validate the larger golden set by hand, see `03-evals/golden_v1_review.md`.
+2. Run `03-evals/src/cal3_fit.py` on that validated golden + the live graph to refit the logistic
+   and measure gain over the confidence-only baseline.
+3. Run `03-evals/src/cal4_sweep.py` to measure judge stability and position bias.
+4. Read `cal3_fit_results.json` and `cal4_results.json`.
+5. Only then hand-edit `CALIBRATED[role] = True` for namespaces that earned the lease.
+
+The public example set proves the mechanism and the refusal behavior. It does **not** prove that any
+role deserves autonomous execution. That evidence is founder-only, graph-local, and intentionally
+kept outside the auto-grant path.
+
 ## Docs map
 
 | Doc | What it covers |

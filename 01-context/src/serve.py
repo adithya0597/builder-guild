@@ -103,9 +103,10 @@ def serve(query_text, role, pattern=None, action=None):
         vec_keys = [h["key"] for h in vec_hits]
         trace["retrieve"] = {"keyword": kw_hits, "graph": graph_hits, "vector": vec_keys}
 
-        # 2. FUSE — RRF across whichever sources fired. keyword is listed FIRST: on an RRF score
-        # tie the stable sort keeps the earlier-seen key, so an exact-ID reference beats an
-        # equally-ranked fuzzy hit (weighted RRF is the R7 upgrade).
+        # 2. FUSE — RRF across whichever sources fired. fuse.rrf breaks RRF score-ties by SOURCE
+        # AUTHORITY (keyword > graph > vector), so an exact-ID reference beats an equally-ranked
+        # fuzzy hit (RC2 fix — previously a doc_id alphabetical tie-break dropped that authority;
+        # full weighted RRF is the R7 upgrade).
         rankings = {**({"keyword": kw_hits} if kw_hits else {}),
                     **({"graph": graph_hits} if graph_hits else {}),
                     **({"vector": vec_keys} if vec_keys else {})}

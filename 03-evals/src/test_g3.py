@@ -16,6 +16,8 @@ injection. The whole suite runs with neo4j DOWN and with the neo4j package absen
 (d) Per-namespace lease: item 5 — auto_revert("finance", 0.4, -3.0) revokes exactly finance,
                         leaves others untouched; mode reads suggest vs autonomous accordingly.
 (e) Golden_v1 draft:    item 4 — >=30 items, balanced pass/abstain, 6 roles, all unvalidated.
+(f) Founder-only paths:  cal3_fit and cal4_sweep accept explicit golden/result paths instead of
+                        hardwiring example_golden.jsonl.
 
 Prints G3_OK iff all pass. sys.exit(1) on any failure.
 """
@@ -273,6 +275,39 @@ def te_golden_v1_draft():
 
 
 # ---------------------------------------------------------------------------
+# (f) Founder-only paths — cal3_fit/cal4_sweep must accept explicit golden/result
+# paths so the founder gate can run on private validated golds instead of the
+# public example_golden.jsonl.
+# ---------------------------------------------------------------------------
+def tf_founder_only_paths():
+    import cal3_fit
+    import cal4_sweep
+
+    dflt3 = cal3_fit.parse_args([])
+    assert dflt3.golden.endswith("example_golden.jsonl"), (
+        f"(f.i) cal3 default golden should remain the public example set, got {dflt3.golden!r}")
+    custom3 = cal3_fit.parse_args(["--golden", "/tmp/founder_gold.jsonl"])
+    assert custom3.golden == "/tmp/founder_gold.jsonl", (
+        f"(f.ii) cal3 must accept --golden override, got {custom3.golden!r}")
+    print(f"  (f.i/ii) cal3 default={dflt3.golden!r} custom={custom3.golden!r} OK")
+
+    dflt4 = cal4_sweep.parse_args([])
+    assert dflt4.golden.endswith("example_golden.jsonl"), (
+        f"(f.iii) cal4 default golden should remain the public example set, got {dflt4.golden!r}")
+    assert dflt4.cal3_results.endswith("cal3_fit_results.json"), (
+        f"(f.iv) cal4 default cal3_results should point at cal3_fit_results.json, got {dflt4.cal3_results!r}")
+    custom4 = cal4_sweep.parse_args([
+        "--golden", "/tmp/founder_gold.jsonl",
+        "--cal3-results", "/tmp/founder_cal3.json",
+    ])
+    assert custom4.golden == "/tmp/founder_gold.jsonl", (
+        f"(f.v) cal4 must accept --golden override, got {custom4.golden!r}")
+    assert custom4.cal3_results == "/tmp/founder_cal3.json", (
+        f"(f.vi) cal4 must accept --cal3-results override, got {custom4.cal3_results!r}")
+    print(f"  (f.iii-vi) cal4 default={dflt4.golden!r} custom_golden={custom4.golden!r} custom_cal3={custom4.cal3_results!r} OK")
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -282,6 +317,7 @@ if __name__ == "__main__":
         ("c", "abstain channel: abstain items never reach judge", tc_abstain_channel),
         ("d", "per-namespace lease: auto_revert revokes finance, leaves engineering", td_per_namespace_lease),
         ("e", "golden_v1 draft: >=30, balanced, 6 roles, all unvalidated", te_golden_v1_draft),
+        ("f", "founder-only paths: cal3/cal4 accept explicit golden/result overrides", tf_founder_only_paths),
     ]
 
     results = []
