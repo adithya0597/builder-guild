@@ -24,6 +24,14 @@ __pycache__/
 data/
 dumps/
 
+# Founder-gate / calibration outputs (may hold PRIVATE graph data — never commit to the public repo).
+# cal3_fit.py / cal4_sweep.py default --out/--ckpt here; a founder run on private golds should pass an
+# explicit private --out, but these guards stop an accidental leak if the default path is used.
+03-evals/src/cal3_fit_results.json
+03-evals/src/cal4_results.json
+03-evals/src/cal3_judge.jsonl
+03-evals/src/cal4_progress.jsonl
+
 # Logs
 *.log
 logs/

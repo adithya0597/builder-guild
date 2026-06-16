@@ -92,7 +92,9 @@ def node_card(tx, key, allowed):
         "    AND r.valid_at <= datetime() AND (r.invalid_at IS NULL OR r.invalid_at > datetime()) "
         "RETURN i.long_context AS card, collect(r.name+' -> '+o.key) AS facts",
         key=key, allowed=allowed).single()
-    return rec["card"], sorted(rec["facts"])
+    if rec is None or rec["card"] is None:        # key absent or out-of-scope for this role
+        return None, []
+    return rec["card"], sorted(f for f in rec["facts"] if f)
 
 
 def status_history(tx, key):
