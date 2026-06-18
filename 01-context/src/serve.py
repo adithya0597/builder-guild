@@ -74,10 +74,39 @@ def _support_coverage(query_text, primary, presentable_facts):
     return round(min(1.0, len(q & r) / max(1, len(q))), 2)
 
 
-def serve(query_text, role, pattern=None, action=None):
+# serve-join (SERVE_JOIN_DESIGN §2-§3): the PageIndex host node's live freshness, read at serve
+# time. A dirty host node makes its drilled sections non-actionable (freshness propagation): the
+# section EvidenceItems inherit node_fresh="stale" -> freshness_state="dirty" -> the gate refuses
+# to ACT on stale prose. Module-level (not inline) so the $0 demo can monkeypatch it without
+# mutating the live graph.
+#   FAIL-CLOSED: if the host node cannot be CONFIRMED present + in-scope, return ("stale", None).
+#   An unconfirmable host must never yield an actionable section — a None record (absent /
+#   out-of-scope / parse uncertainty) collapses to "stale" so freshness_state="dirty",
+#   is_actionable()=False, and the section's gate claim carries stale=True. Only an explicitly
+#   present, NON-dirty node returns "fresh". Node-level supersession is NOT modeled in v1 (only
+#   edges are bi-temporal), so this propagates the host DIRTY axis only; host validity stays
+#   "current" by design.
+def _host_freshness(s, key, allowed):
+    rec = s.run("MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
+                "RETURN coalesce(n.dirty,false) AS dirty, n.namespace AS ns", k=key, allowed=allowed).single()
+    if rec is None:
+        return "stale", None          # FAIL-CLOSED: unconfirmable host -> non-actionable
+    return ("stale" if rec["dirty"] else "fresh"), rec["ns"]
+
+
+def serve(query_text, role, pattern=None, action=None, deep_serve=False):
     """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
-    gate+abstain (sufficiency x confidence, suggest-only) -> execute.
+    serve-join (deep PageIndex escalation, OPT-IN) -> gate+abstain -> execute.
+
+    deep_serve (serve-join, SERVE_JOIN_DESIGN §2 + §7): DEFAULT OFF. The §2 trigger SIGNAL
+    (coverage_initial < tau AND a long-doc node in scope) is ALWAYS computed and traced, but the
+    PageIndex drill executes only when deep_serve=True. This keeps every existing caller at $0
+    with behavior byte-identical to before (no augmentation without opt-in).
+
+    In the public mirror the PageIndex drill is ALWAYS STUBBED via pageindex_adapter (returns
+    resolved_at="gated" by default; tests inject a fake for the positive path). Zero external
+    or LLM calls either way.
 
     Honest scope (per codex review 2026-06-05):
       - runs the graph + vector rungs IN PARALLEL for fusion — it does NOT use ladder.retrieve()'s
@@ -89,7 +118,8 @@ def serve(query_text, role, pattern=None, action=None):
     SECURITY: `role` is TRUSTED here. It must be AUTHENTICATED upstream — a self-asserted
     role='governance' would read all namespaces. Do not expose `role` to an unauthenticated caller.
     """
-    import scope as _scope, ladder, fuse, stamp, reconcile, abstain
+    import scope as _scope, ladder, fuse, stamp, reconcile, abstain, evidence, epist
+    import pageindex_adapter
     sc = _scope.scope(role)
     allowed, k = sc["allowed"], sc["t_cap"]
     action = action or {"category": "routine", "reversible": True}
@@ -180,9 +210,130 @@ def serve(query_text, role, pattern=None, action=None):
             k=list(touched), allowed=allowed)]
         trace["isolation"] = {"clean": not leaked, "leaked": leaked}
 
-        # 6+7. GATE + ABSTAIN — claims from presentable facts; sufficiency x confidence, suggest-only
-        claims = [{"id": f["fact"], "support_status": "SUPPORTED",
-                   "stale": f["fresh"] == "stale", "conflict": False} for f in card["presentable"]]
+        # ── SERVE-JOIN (SERVE_JOIN_DESIGN §2-§3): deep-PageIndex escalation + evidence normalization
+        # feeding the SINGLE existing gate. Sequence is FROZEN: normalize -> epist AUTHORITY ORDER ->
+        # freshness propagation -> build claims -> gate (the gate below stays last + single).
+        # epist ORDERS evidence by authority; it does NOT decide actionability (that is the gate).
+        # Vector hits are recall-only and never become gate claims.
+        #
+        # (a) DEEP-RUNG TRIGGER — frozen SIGNAL: warranted iff NOT isolation-leaked, non-empty
+        # query_text, coverage_initial below the shared tau, AND the long-doc node in scope has a
+        # non-empty doc-sha. The signal is ALWAYS computed + traced; the REAL drill executes only
+        # under deep_serve (opt-in, $0-safe).
+        # COVERAGE-GATED DB READS: the PageIndex ref/sha lookups run ONLY when query_text is
+        # non-empty AND coverage_initial < tau. Empty/graph-only serve() (e.g. corrective.py
+        # calls serve(query_text='') for graph-only retrieval) skips ALL PageIndex reads entirely
+        # — _support_coverage returns 0.0 on |Q|=0, so a bare coverage check would fall through
+        # to the else-branch and do unnecessary Neo4j round-trips.
+        # ALIGN WITH LADDER: when it DOES evaluate, ladder drills sorted(in-scope nodes with
+        # pageindex_ref)[0]; serve picks that SAME candidate, then warrants deep only if that
+        # candidate ALSO has pageindex_doc_sha (non-empty — an empty-string sha is treated as absent).
+        coverage_initial = _support_coverage(query_text, primary, [f["fact"] for f in card["presentable"]])
+        deep = None
+        deep_augmented = False                         # drill RAN vs sections ADDED are distinct
+        pageindex_items = []
+        if not query_text:
+            # graph-only serve() (empty query_text): skip ALL PageIndex reads — no query to navigate.
+            # _support_coverage returns 0.0 on |Q|=0; without this guard the coverage check would
+            # fall through to the else-branch and trigger unnecessary PageIndex Neo4j round-trips.
+            deep_warranted = False
+            trace["serve_join"] = {"coverage_initial": coverage_initial, "deep_warranted": False,
+                                   "reason": "no query text - PageIndex reads skipped"}
+        elif coverage_initial >= evidence.DEEP_COVERAGE_TAU:
+            # coverage sufficient: skip BOTH PageIndex reads entirely — drill not evaluated.
+            deep_warranted = False
+            trace["serve_join"] = {"coverage_initial": coverage_initial, "deep_warranted": False,
+                                   "reason": "coverage sufficient - drill not evaluated"}
+        else:
+            ref_nodes = [r["k"] for r in s.run(                   # ladder's longdocs set (ref only)
+                "MATCH (n:Entity) WHERE n.pageindex_ref IS NOT NULL "
+                "AND n.namespace IN $allowed RETURN n.key AS k", allowed=allowed)]
+            drill_candidate = sorted(ref_nodes)[0] if ref_nodes else None   # == ladder's sorted(...)[0]
+            # NON-EMPTY sha: IS NOT NULL alone passes an empty-string sha (""), which may match a
+            # ""-recorded tree. Require a real sha to align with ladder's binding semantics.
+            candidate_has_sha = bool(drill_candidate) and bool(s.run(
+                "MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
+                "AND n.pageindex_doc_sha IS NOT NULL AND n.pageindex_doc_sha <> '' "
+                "RETURN n.key AS k", k=drill_candidate, allowed=allowed).single())
+            # F1: bool(query_text) guard also lives in deep_warranted for clarity — belt+suspenders.
+            deep_warranted = (not leaked) and bool(query_text) and candidate_has_sha
+            deep_fired = deep_warranted and deep_serve   # real drill is OPT-IN (default off)
+            pageindex_host_note = None
+            if deep_fired:
+                deep = pageindex_adapter.drill(allowed, query_text, k)
+                # fail-safe: non-"pageindex" / zero sections -> NO augmentation, gate on original.
+                if deep.get("resolved_at") == "pageindex" and deep.get("sections"):
+                    host = deep["doc"]
+                    host_fresh, host_ns = _host_freshness(s, host, allowed)   # freshness propagation
+                    if host_ns is None:
+                        # FAIL-CLOSED: host UNCONFIRMABLE (rec is None) -> DROP the section.
+                        # No EvidenceItem with a fabricated namespace may reach the answer or the
+                        # gate. (A confirmed-DIRTY host has host_ns present + "stale" and DOES
+                        # build a non-actionable section below — that is the freshness-safety path.)
+                        pageindex_host_note = "unconfirmable - section dropped"
+                    else:
+                        ref = s.run("MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
+                                    "RETURN n.pageindex_ref AS ref", k=host, allowed=allowed).single()
+                        src_path = ref["ref"] if ref else None
+                        # F2: ONE EvidenceItem per drill — the drill returns a single synthesized
+                        # answer over N selected section IDs (not per-section text). Build one item
+                        # carrying text=answer, section_id=comma-joined IDs for provenance.
+                        pageindex_items.append(evidence.from_pageindex(
+                            host_node_id=host, namespace=host_ns, text=deep["answer"],
+                            source_path=src_path,
+                            section_id=",".join(deep["sections"]),
+                            node_fresh=host_fresh))
+                        composed.append(f"pageindex({host}): {deep['answer']}")   # augment answer surface
+                        deep_augmented = True
+            trace["serve_join"] = {"coverage_initial": coverage_initial,
+                                   "drill_candidate": drill_candidate, "candidate_has_sha": candidate_has_sha,
+                                   "deep_warranted": deep_warranted, "deep_serve": deep_serve,
+                                   "deep_fired": deep_fired, "deep_augmented": deep_augmented,
+                                   "pageindex_host": pageindex_host_note,
+                                   "resolved_at": deep.get("resolved_at") if deep else None,
+                                   "n_pageindex_sections": len(pageindex_items)}
+
+        # (b)+(c) NORMALIZE -> EPIST AUTHORITY ORDER -> the ordered set builds the gate claims.
+        # epist stays LOAD-BEARING for ORDERING: rank by epist.weights_for(role) over each item's
+        # retrieval_method (graph/pageindex/vector); claims are built FROM that one ordered list.
+        # graph facts always normalize (they feed the gate even with no drill); the PageIndex side
+        # is present only when a drill augmented.
+        # F3 — DESIGN INTENT: epist provides authority ORDERING (trace + claims-list); the gate is
+        # intentionally order-insensitive (epist != gate). Answer-surface ordering + conflict are v2.
+        primary_ns = next((r["ns"] for r in s.run(
+            "MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed RETURN n.namespace AS ns",
+            k=primary, allowed=allowed)), (allowed[0] if allowed else "shared"))
+        graph_items = [evidence.from_graph(f["fact"], namespace=primary_ns, node_id=primary,
+                                           validity=f["validity"], node_fresh=f["fresh"])
+                       for f in card["presentable"]]
+        _w = epist.weights_for(role)
+        merged_items = sorted(graph_items + pageindex_items,
+                              key=lambda it: -_w.get(it.retrieval_method, 0.0))
+        trace["epist"] = {**trace.get("epist", {}),
+                          "merged_authority_order": [it.authority_hint for it in merged_items],
+                          "n_merged": len(merged_items)}
+
+        # 6+7. GATE + ABSTAIN — claims BUILT FROM the authority-ordered merged set (one homogeneous
+        # list, not two). graph fact -> SUPPORTED, stale from its freshness; PageIndex section ->
+        # SUPPORTED, stale = NOT is_actionable (freshness propagation: a dirty host -> stale=True).
+        # A stale claim is a HARD faithfulness violation in abstain.stage_a_decision -> the gate
+        # refuses to ACT (routes to human).
+        #   conflict = False FOR EVERY CLAIM — v1 SCOPE (founder 2026-06-17): conflict deferred to v2.
+        #   Cross-source graph-vs-prose conflict needs semantic matching across different node
+        #   identities; within-source same-relation multi-edges are co-valid additive facts already
+        #   adjudicated upstream (bi-temporal supersession + mutate-layer cardinality), so serve must
+        #   NOT re-flag them — the prior resolve_slot path false-positived on additive edges (e.g.
+        #   BLOCKS->A, BLOCKS->B) -> false abstains. epist AUTHORITY ORDERING stays load-bearing above.
+        claims = [{"id": it.text if it.retrieval_method != "pageindex" else (it.section_id or it.text),
+                   "support_status": "SUPPORTED",
+                   "stale": not evidence.is_actionable(it.freshness_state),
+                   "conflict": False}   # v1 SCOPE: conflict deferred to v2 (cross-source needs
+                                        # semantic matching across node identities; within-source
+                                        # same-relation multi-edges are co-valid additive facts
+                                        # adjudicated upstream by bi-temporal + cardinality).
+                                        # DO NOT wire resolve_slot — it false-positives on additive
+                                        # edges -> false abstains.
+                  for it in merged_items]
         if not claims:
             claims = [{"id": primary, "support_status": "UNSUPPORTED", "stale": False, "conflict": False}]
         # confidence basis is EXPLICIT (codex: no fabricated 0.9). A vector hit uses its cosine
@@ -213,8 +364,17 @@ def serve(query_text, role, pattern=None, action=None):
 
 
 def _demo():
-    """INT-3: one real query runs the FULL chain end-to-end on the live graph; trace each stage."""
+    """INT-3 + serve-join: one real query runs the FULL chain end-to-end on the live graph;
+    then the serve-join is exercised with a STUBBED adapter (zero LLM/external calls, $0).
+
+    $0 LAW: the REAL PageIndex drill is intentional-run only. Here pageindex_adapter._inject()
+    installs a canned pageindex payload so the join WIRING is tested without any external call.
+    serve() only ever calls pageindex_adapter.drill() for the deep drill (the retrieval/fusion
+    rungs use keyword_rung/graph_rung/vector_rung directly), so the injection is surgical.
+    """
     import sys, json
+    import pageindex_adapter, evidence, epist
+
     r = serve("rate limit backoff for the inference client", "engineering")
     print(json.dumps(r["trace"], indent=2, default=str))
     print(f"\n[serve] primary={r['primary']} decision={r['decision']} mode={r['mode']} "
@@ -225,6 +385,134 @@ def _demo():
     print("INT3_OK" if ok else f"INT3_FAIL stages={set(r['trace'])} decision={r['decision']}")
     if not ok:
         sys.exit(1)
+
+    # ── SERVE-JOIN (stubbed adapter, $0) ────────────────────────────────────────────────────────
+    fail = []
+    _DRILL = {"resolved_at": "pageindex",
+              "answer": "the sufficient-context paper finds abstention beats answering on low coverage",
+              "doc": "extsrc:context-evals",          # the real in-scope long-doc node (shared ns)
+              "sections": ["0001", "0007"]}
+    q_low = "what does the sufficient context paper conclude about abstention"
+
+    # ($0 DEFAULT GUARD) — a default serve() (deep_serve omitted) must NOT execute the drill even
+    # when the signal is WARRANTED. A tripwire raises if pageindex_adapter.drill() is touched;
+    # the call must still succeed with deep_warranted=True (signal computed) but deep_fired=False.
+    def _tripwire(allowed, q, t):
+        raise AssertionError("pageindex_adapter.drill() called under deep_serve=False — $0 LAW breach")
+    pageindex_adapter._inject(_tripwire)
+    try:
+        r0 = serve(q_low, "engineering")                        # deep_serve defaults to False
+    finally:
+        pageindex_adapter._inject(None)
+    sj0 = r0["trace"]["serve_join"]
+    print(f"[$0-def]  low-cov default serve() -> deep_warranted={sj0['deep_warranted']} "
+          f"deep_fired={sj0['deep_fired']} (signal computed, NO real drill)")
+    fail += [] if (sj0["deep_warranted"] is True and sj0["deep_fired"] is False
+                   and sj0["n_pageindex_sections"] == 0) \
+        else ["($0) low-cov default serve fired the drill or skipped the warranted signal"]
+
+    # ($0 + COVERAGE-GATE) — a HIGH-coverage default serve() must do ZERO PageIndex reads.
+    # The tripwire stays armed (must not fire), and serve_join trace must show deep_warranted=False
+    # with the "coverage sufficient" reason and NO drill_candidate field.
+    # Use a query that names in-scope entity IDs so _support_coverage() meets tau.
+    # "issue:SPI-2 blocks issue:SPI-3" -> primary=issue:SPI-3; issue:SPI-3's facts cover SPI-2,
+    # giving coverage_initial=0.5 == tau -> coverage gate fires (>= tau is True), zero PageIndex reads.
+    q_hi = "issue:SPI-2 blocks issue:SPI-3"
+    pageindex_adapter._inject(_tripwire)
+    try:
+        rh = serve(q_hi, "engineering")
+    finally:
+        pageindex_adapter._inject(None)
+    sjh = rh["trace"]["serve_join"]
+    print(f"[$0-cov]  high-cov default serve() -> coverage_initial={sjh['coverage_initial']} "
+          f"deep_warranted={sjh.get('deep_warranted')} reason={sjh.get('reason')!r}")
+    fail += [] if (sjh.get("deep_warranted") is False
+                   and sjh.get("reason") == "coverage sufficient - drill not evaluated"
+                   and "drill_candidate" not in sjh and "n_pageindex_sections" not in sjh) \
+        else [f"($0-cov) high-coverage serve evaluated/ran the drill or did a PageIndex read: {sjh}"]
+
+    # A low-coverage query WITH a long-doc in scope -> signal is warranted; with deep_serve=True
+    # the stub adapter returns the canned drill (zero LLM). Proves join WIRING, not the real drill.
+    pageindex_adapter._inject(lambda allowed, q, t: dict(_DRILL))
+    try:
+        r1 = serve(q_low, "engineering", deep_serve=True)
+    finally:
+        pageindex_adapter._inject(None)
+    sj = r1["trace"]["serve_join"]
+    print(f"\n[join]   q_low -> deep_fired={sj['deep_fired']} deep_augmented={sj['deep_augmented']} "
+          f"sections={sj['n_pageindex_sections']} candidate={sj['drill_candidate']}")
+    print(f"[join]   composed_evidence (tail)={r1['composed_evidence'][-1:]}")
+    # (i) the drill RAN and ACTUALLY augmented; the PageIndex answer reached the composed surface.
+    answer_in_composed = any(_DRILL["answer"] in line for line in r1["composed_evidence"])
+    fail += [] if (sj["deep_fired"] and sj["deep_augmented"] and sj["resolved_at"] == "pageindex"
+                   and sj["n_pageindex_sections"] == 1 and answer_in_composed) \
+        else ["(i) stubbed drill did not augment composed with the PageIndex answer"]
+
+    # (i-transform) — assert the CODE transforms real inputs, not the stub echoing itself.
+    # (a) the normalizer produces a prose-authority EvidenceItem with host key + section id +
+    #     source path — fields the join CODE sets, not the drill dict:
+    pit = evidence.from_pageindex(host_node_id=_DRILL["doc"], namespace="shared",
+                                  text=_DRILL["answer"], source_path="/docs/context-evals.md",
+                                  section_id=_DRILL["sections"][0], node_fresh="fresh")
+    fail += [] if (pit.retrieval_method == "pageindex" and pit.authority_hint == "prose"
+                   and pit.node_id == _DRILL["doc"] and pit.section_id == _DRILL["sections"][0]
+                   and pit.freshness_state == "current") \
+        else ["(i-transform) from_pageindex did not produce the expected prose EvidenceItem"]
+    # (b) epist.weights_for puts fact-authority before prose:
+    _w = epist.weights_for("engineering")
+    gi = evidence.from_graph("ASSIGNED_TO -> agent:cto", namespace="engineering", node_id="issue:SPI-2")
+    mixed = sorted([pit, gi], key=lambda it: -_w.get(it.retrieval_method, 0.0))
+    mixed_auth = [it.authority_hint for it in mixed]
+    fail += [] if (mixed_auth == ["fact", "prose"]
+                   and mixed[0].retrieval_method == "graph"
+                   and mixed[1].node_id == _DRILL["doc"]) \
+        else [f"(i-transform) epist authority ordering wrong: {mixed_auth}"]
+    # live drilled set reached the gate as prose claims: n_merged >= pageindex sections
+    # (may also include graph facts from primary card; prose authority must be present)
+    eo = r1["trace"]["epist"]
+    fail += [] if (eo["n_merged"] >= sj["n_pageindex_sections"]
+                   and sj["n_pageindex_sections"] > 0
+                   and "prose" in eo["merged_authority_order"]) \
+        else [f"(i-transform) drilled sections did not reach the gate as claims: {eo}"]
+    # (c) v1 conflict behavior: conflict is DEFERRED to v2 — conflict_slots absent from trace:
+    fail += [] if "conflict_slots" not in eo else ["(i-transform) conflict_slots must be absent (v2 defer)"]
+    print(f"[join]   epist order(live)={eo['merged_authority_order']} mixed-order={mixed_auth} "
+          f"n_merged={eo['n_merged']} (conflict deferred to v2: every claim conflict=False)")
+
+    # (ii) FRESHNESS FAIL-CLOSED: a DIRTY/superseded host node makes sections non-actionable.
+    # Monkeypatch _host_freshness to "stale" (simulates a dirty host WITHOUT mutating the live
+    # graph) -> PageIndex claim carries stale=True -> abstain.stage_a_decision treats it as a HARD
+    # faithfulness violation (via=faithfulness) -> gate must NOT execute an act.
+    real_host = _host_freshness
+    pageindex_adapter._inject(lambda allowed, q, t: dict(_DRILL))
+    try:
+        globals()["_host_freshness"] = lambda s, key, allowed: ("stale", "shared")
+        r2 = serve(q_low, "engineering", deep_serve=True)
+    finally:
+        pageindex_adapter._inject(None)
+        globals()["_host_freshness"] = real_host
+    has_pi = r2["trace"]["serve_join"]["n_pageindex_sections"] > 0
+    d_via, d_final = r2["trace"]["gate_abstain"].get("via"), r2["decision"]
+    print(f"[fresh]  dirty-host drill -> via={d_via} decision={d_final} executed={r2['executed']} "
+          f"(stale section -> hard faithfulness violation, must NOT act)")
+    fail += [] if (has_pi and d_via == "faithfulness" and r2["executed"] is False and d_final != "pass") \
+        else [f"(ii) stale PageIndex section did not hard-fail: via={d_via} decision={d_final}"]
+
+    # CONTROL — the SAME query+drill with a FRESH host does NOT trip the faithfulness hard-gate:
+    pageindex_adapter._inject(lambda allowed, q, t: dict(_DRILL))
+    try:
+        r3 = serve(q_low, "engineering", deep_serve=True)
+    finally:
+        pageindex_adapter._inject(None)
+    f_via = r3["trace"]["gate_abstain"].get("via")
+    print(f"[fresh]  fresh-host control -> via={f_via} decision={r3['decision']} "
+          f"(no stale claim: NOT the faithfulness hard-gate)")
+    fail += [] if f_via == "sufficiency×confidence" \
+        else [f"(ii) fresh-host control should route via sufficiency×confidence, got via={f_via}"]
+
+    if fail:
+        print("INT3_FAIL(serve-join):", fail); sys.exit(1)
+    print("INT3_OK")
 
 
 if __name__ == "__main__":
