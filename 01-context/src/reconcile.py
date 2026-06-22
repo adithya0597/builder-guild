@@ -12,6 +12,9 @@ THE RULE (the two axes are ORTHOGONAL; never collapsed into one scalar):
   5. actionable   = current AND node-fresh (both axes must pass to act).
   6. the card stamp is a TUPLE {node_fresh, n_current, n_superseded, actionable} — there is
      no single "card confidence" number.
+  7. a FUNCTIONAL (arity:1) relation showing >1 current edge is an upstream exactly-one-current
+     breach (the sentinel + single-writer should make it impossible) — it is QUARANTINED to
+     `ambiguous_functional` and the card is NEVER actionable while one exists.
 
 Naming collision (the second half of S6): "confidence" named three different quantities.
 They are now disambiguated everywhere (see RECALL_NAMING below + docs):
@@ -21,6 +24,7 @@ They are now disambiguated everywhere (see RECALL_NAMING below + docs):
 None of the three is called "confidence" unqualified.
 """
 import sys
+from collections import Counter
 
 RECALL_NAMING = {
     "retrieval_score": "evidence relevance from the retriever [0,1] (was: evidence.confidence)",
@@ -29,20 +33,27 @@ RECALL_NAMING = {
 }
 
 
-def reconcile(node_fresh, facts):
+def reconcile(node_fresh, facts, functional_rels=frozenset()):
     """facts: [{fact, validity in {current,historical}}]. node_fresh in {fresh,stale}.
+    functional_rels: relation names with arity:1 (ASSIGNED_TO, HAS_STATUS, PART_OF, ...); a
+    functional relation with >1 current edge is an upstream exactly-one-current breach.
     Returns the reconciled card stamp keeping the two axes orthogonal."""
     current = [f for f in facts if f["validity"] == "current"]
     superseded = [f for f in facts if f["validity"] == "historical"]
     node_is_fresh = node_fresh == "fresh"
+    # read-side invariant guard (defense-in-depth): the sentinel + single-writer make >1 current on
+    # an arity:1 relation impossible; if one slips through we QUARANTINE it (never silently act).
+    rel_counts = Counter(f["fact"].split(" -> ", 1)[0] for f in current)
+    ambiguous_functional = sorted(r for r in functional_rels if rel_counts.get(r, 0) > 1)
     return {
         "node_fresh": node_fresh,                  # axis 1: node content freshness (unaffected by edges)
         "presentable": current,                    # axis 2: only current edges shown
         "superseded": superseded,                  # quarantined, retained for provenance/audit
         "n_current": len(current),
         "n_superseded": len(superseded),
-        # actionable requires BOTH axes to pass; never a single collapsed scalar
-        "actionable": bool(current) and node_is_fresh,
+        "ambiguous_functional": ambiguous_functional,  # arity:1 rels with >1 current (invariant breach)
+        # actionable requires BOTH axes to pass AND no ambiguous functional edge; never a collapsed scalar
+        "actionable": bool(current) and node_is_fresh and not ambiguous_functional,
     }
 
 
@@ -79,6 +90,15 @@ def demo():
     fail += [] if (c3["node_fresh"] == "stale" and c3["n_current"] == 4
                    and c3["n_superseded"] == 1 and c3["actionable"] is False) \
         else ["case3: independent-axis degrade wrong"]
+
+    # CASE 4 (read-side guard): a functional relation with 2 current edges is QUARANTINED, not actionable
+    facts_amb = [{"fact": "ASSIGNED_TO -> agent:a", "validity": "current"},
+                 {"fact": "ASSIGNED_TO -> agent:b", "validity": "current"}]
+    c4 = reconcile("fresh", facts_amb, functional_rels={"ASSIGNED_TO"})
+    print(f"[case4] functional ASSIGNED_TO with 2 current: ambiguous={c4['ambiguous_functional']} "
+          f"actionable={c4['actionable']} (expect breach flagged, not actionable)")
+    fail += [] if (c4["ambiguous_functional"] == ["ASSIGNED_TO"] and c4["actionable"] is False) \
+        else ["case4: functional >1-current guard not enforced"]
 
     # naming: three disambiguated names, none is bare "confidence"
     print(f"[naming] disambiguated recall names: {list(RECALL_NAMING)}")

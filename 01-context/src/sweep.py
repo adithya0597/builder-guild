@@ -54,7 +54,8 @@ def demo():
             s.execute_write(lambda tx: embed_node(tx, "sw:A", "initial content about caching", "prose", T0))
             s.execute_write(lambda tx: embed_node(tx, "sw:B", "neighbour about logging", "prose", T0))
             s.execute_write(lambda tx: tx.run("MATCH (a:Entity{key:'sw:A'}),(b:Entity{key:'sw:B'}) "
-                                              "MERGE (a)-[:RELATES_TO {name:'RELATED_TO',namespace:$ns}]->(b)", ns=NS))
+                                              "MERGE (a)-[r:RELATES_TO {name:'RELATED_TO',namespace:$ns}]->(b) "
+                                              "ON CREATE SET r.valid_at=datetime(), r.created_at=datetime(), r.invalid_at=datetime('9999-12-31T00:00:00Z')", ns=NS))
 
             before = s.run("MATCH (n:Entity{key:'sw:A'}) RETURN n.embedding AS v, n.content_rev AS cr, n.embedded_content_rev AS ecr").single()
             b_before = s.run("MATCH (n:Entity{key:'sw:B'}) RETURN n.embedded_at AS at, n.embedding AS v").single()

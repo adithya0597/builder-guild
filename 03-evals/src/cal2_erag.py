@@ -30,7 +30,7 @@ def unit_card(s, key):
     rec = s.run(
         "MATCH (n:Entity {key:$k}) "
         "RETURN n.long_context AS ctx, "
-        "  [(n)-[r:RELATES_TO]->(o) WHERE r.invalid_at IS NULL | [r.name, o.key]] AS edges",
+        "  [(n)-[r:RELATES_TO]->(o) WHERE r.invalid_at > datetime() | [r.name, o.key]] AS edges",
         k=key).single()
     return {"ctx": rec["ctx"] or "", "edges": [tuple(e) for e in rec["edges"]]} if rec else None
 

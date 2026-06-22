@@ -139,7 +139,7 @@ def _summarize_community(session, ns, cid, member_keys, ckpt):
     for mk in member_keys:
         rows = session.run(
             "MATCH (a:Entity {key: $mk})-[r:RELATES_TO]->(b:Entity) "
-            "WHERE b.key IN $members AND r.namespace = $ns AND r.invalid_at IS NULL "
+            "WHERE b.key IN $members AND r.namespace = $ns AND r.invalid_at > datetime() "
             "RETURN r.name AS name, b.key AS target",
             mk=mk,
             members=list(member_keys),
@@ -193,7 +193,7 @@ def build_communities(
             "WHERE a.namespace = $ns "
             "  AND r.namespace = $ns "
             "  AND b.namespace = $ns "
-            "  AND r.invalid_at IS NULL "
+            "  AND r.invalid_at > datetime() "
             "RETURN a.key AS src, b.key AS dst",
             ns=ns,
         ).data()

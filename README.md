@@ -34,7 +34,7 @@ Vector RAG answers "what's similar?". It can't answer "who owns X **now**", "wha
 **when** we decided F", or "what's blocked, on whom, visible to which role" — the multi-hop,
 point-in-time, permissioned questions a fleet actually asks. Builder Guild makes those first-class:
 
-- **Three kinds of truth, never mixed:** current truth (bi-temporal edges, `invalid_at IS NULL`),
+- **Three kinds of truth, never mixed:** current truth (bi-temporal edges, current = `invalid_at > now` via a sentinel stamp),
   role-scoped truth (namespace on node AND edge, enforced at read), temporal truth (as-of queries
   require historical evidence — current owner ≠ past owner).
 - **Deterministic writes:** facts enter via `MERGE`/`MATCH…SET` ETL with per-relation rules

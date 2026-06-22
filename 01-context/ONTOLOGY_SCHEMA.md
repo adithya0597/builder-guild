@@ -170,9 +170,9 @@ Orthogonal to the tier hierarchy (PART 3). Five elements; relationship types are
 | Provenance | `(:Episodic)-[:MENTIONS]->(:Entity)` | `created_at` | which episode observed an entity |
 | Sequence | `(:Episodic)-[:NEXT_EPISODE]->(:Episodic)` | `created_at` | timeline adjacency |
 
-**Versioning = version the EDGE** (Graphiti): on contradiction the old fact edge is invalidated in place (`invalid_at = new.valid_at`, `expired_at = now()`) and kept; a new edge is added. **As-of-T** = `valid_at <= T AND (invalid_at IS NULL OR invalid_at > T)` on the range index (B3) — instant, no LLM.
+**Versioning = version the EDGE** (Graphiti): on contradiction the old fact edge is invalidated in place (`invalid_at = new.valid_at`, `expired_at = now()`) and kept; a new edge is added. **SENTINEL contract:** a current edge carries `invalid_at = datetime('9999-12-31T00:00:00Z')` (never NULL), so current = `invalid_at > now` and **As-of-T** = `valid_at <= T AND invalid_at > T` — one predicate, both halves on the `rel_invalid_at` range index (B3), instant, no LLM.
 
-> Cypher gotcha: never place a **null** property in a `MERGE` pattern (Neo4j rejects it). "Current fact" ⇒ `invalid_at`/`expired_at` are ABSENT; set the rest via `SET`.
+> SENTINEL contract: a current fact carries `invalid_at = datetime('9999-12-31T00:00:00Z')` (set on `ON CREATE`, never NULL); supersede sets `invalid_at = now`. `expired_at` stays ABSENT on a current edge (set only on supersede). Cypher gotcha: never place a literal `null` in a `MERGE` pattern (Neo4j rejects it) — set fields via `SET`.
 
 ## §9 — Node-property schema (C2: what a well-formed node carries)
 

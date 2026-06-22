@@ -14,8 +14,9 @@ Spec honored (ONTOLOGY_SCHEMA §10 / §7):
   - the evaluation clock `now` is an EXPLICIT argument, never ambient datetime(), so a temporal
     mutation is reproducible (same input + same now -> same graph). §10 calls ambient-clock a
     latent bug in the bi-temporal path; this engine fixes it at the source.
-  - invalid_at/expired_at are ABSENT on a current edge (set only on supersede/remove), never
-    placed as null inside a MERGE pattern (§7 Cypher gotcha).
+  - SENTINEL contract: a current edge carries invalid_at = SENTINEL (9999-12-31), never ABSENT;
+    supersede/remove sets invalid_at = now. current = (invalid_at > now). expired_at stays ABSENT
+    on a current edge (set only on supersede/remove).
 """
 import sys
 import yaml
@@ -23,7 +24,8 @@ from pathlib import Path
 from neo4j import GraphDatabase
 
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
-RULES = yaml.safe_load((Path(__file__).parent / "schema" / "relations.yaml").read_text())["relations"]
+SENTINEL = "9999-12-31T00:00:00Z"   # current edge carries invalid_at = SENTINEL (never absent); supersede -> invalid_at = now
+RULES = yaml.safe_load((Path(__file__).parent.parent / "schema" / "relations.yaml").read_text())["relations"]
 
 
 def resolve_entity(tx, label, key, now, ns, short="", long_="", ep=None):
@@ -78,7 +80,7 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
         if "remove" not in rule["verbs"]:
             raise ValueError(f"{rel}: verbs='{rule['verbs']}' forbids remove")
         tx.run("MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel, namespace:$ns}]->(o:Entity {key:$o}) "
-               "WHERE r.invalid_at IS NULL "
+               "WHERE r.invalid_at > datetime($now) "
                "SET r.invalid_at=datetime($now), r.expired_at=datetime($now)",
                s=s_key, rel=rel, o=o_key, now=now, ns=ns)
         return
@@ -89,8 +91,8 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
         cyc = tx.run(
             "MATCH (o:Entity {key:$o}) "
             "OPTIONAL MATCH p=(o)-[:RELATES_TO*1..]->(s:Entity {key:$s}) "
-            "WHERE all(r IN relationships(p) WHERE r.name=$rel AND r.namespace=$ns AND r.invalid_at IS NULL) "
-            "RETURN count(p) > 0 AS cycle", o=o_key, s=s_key, rel=rel, ns=ns).single()
+            "WHERE all(r IN relationships(p) WHERE r.name=$rel AND r.namespace=$ns AND r.invalid_at > datetime($now)) "
+            "RETURN count(p) > 0 AS cycle", o=o_key, s=s_key, rel=rel, ns=ns, now=now).single()
         if cyc and cyc["cycle"]:
             raise ValueError(f"{rel}: adding {s_key}->{o_key} would close a cycle (graph_invariant)")
 
@@ -99,14 +101,14 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
 
     if overflow == "evict":                       # functional re-anchor: supersede incumbent (ns-scoped)
         tx.run("MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel, namespace:$ns}]->(prev:Entity) "
-               "WHERE r.invalid_at IS NULL AND prev.key <> $o "
+               "WHERE r.invalid_at > datetime($now) AND prev.key <> $o "
                "SET r.invalid_at=datetime($now), r.expired_at=datetime($now), "
                "    r.supersede_kind=CASE WHEN $temporal='static' THEN 'correction' ELSE 'validity' END",
                s=s_key, rel=rel, o=o_key, now=now, ns=ns, temporal=temporal)
     elif overflow == "reject" and functional:     # arity:1 + reject: collision -> REJECT
         clash = tx.run("MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel, namespace:$ns}]->(prev:Entity) "
-                       "WHERE r.invalid_at IS NULL AND prev.key <> $o RETURN prev.key AS k LIMIT 1",
-                       s=s_key, rel=rel, o=o_key, ns=ns).single()
+                       "WHERE r.invalid_at > datetime($now) AND prev.key <> $o RETURN prev.key AS k LIMIT 1",
+                       s=s_key, rel=rel, o=o_key, ns=ns, now=now).single()
         if clash:
             raise ValueError(f"{rel}: arity:1 overflow_policy:reject — refusing {o_key}; "
                              f"current is {clash['k']} (no silent supersede)")
@@ -118,12 +120,12 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
     tx.run("MATCH (s:Entity {key:$s}),(o:Entity {key:$o}) "
            "MERGE (s)-[r:RELATES_TO {name:$rel, namespace:$ns}]->(o) "
            "ON CREATE SET r.valid_at=datetime($now), r.created_at=datetime($now), "
-           "              r.episodes=$eps, r.temporal=$temporal "
+           "              r.episodes=$eps, r.temporal=$temporal, r.invalid_at=datetime($sentinel) "
            "ON MATCH  SET r.episodes=CASE WHEN $ep IS NULL OR $ep IN r.episodes "
            "                              THEN r.episodes ELSE r.episodes+$ep END, "
-           "              r.valid_at=CASE WHEN r.invalid_at IS NULL THEN r.valid_at ELSE datetime($now) END, "
-           "              r.invalid_at=null, r.expired_at=null",
-           s=s_key, o=o_key, rel=rel, ns=ns, now=now, eps=[ep] if ep else [], ep=ep, temporal=temporal)
+           "              r.valid_at=CASE WHEN r.invalid_at > datetime($now) THEN r.valid_at ELSE datetime($now) END, "
+           "              r.invalid_at=datetime($sentinel), r.expired_at=null",
+           s=s_key, o=o_key, rel=rel, ns=ns, now=now, sentinel=SENTINEL, eps=[ep] if ep else [], ep=ep, temporal=temporal)
 
 
 def apply_set_snapshot(tx, s_key, rel, desired, now, ns, ep=None):
@@ -133,7 +135,7 @@ def apply_set_snapshot(tx, s_key, rel, desired, now, ns, ep=None):
         raise ValueError(f"{rel}: not a set_snapshot relation")
     current = {r["k"] for r in tx.run(
         "MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel, namespace:$ns}]->(o) "
-        "WHERE r.invalid_at IS NULL RETURN o.key AS k", s=s_key, rel=rel, ns=ns)}
+        "WHERE r.invalid_at > datetime($now) RETURN o.key AS k", s=s_key, rel=rel, ns=ns, now=now)}
     desired = set(desired)
     for o in sorted(desired - current):
         apply_edge(tx, s_key, rel, o, now, ns, ep, op="add")
@@ -155,7 +157,7 @@ def current_targets(tx, s_key, rel, ns=None):
     """ns=None -> any namespace (current behaviour); ns set -> scoped to that namespace."""
     return sorted(r["k"] for r in tx.run(
         "MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel}]->(o) "
-        "WHERE r.invalid_at IS NULL AND ($ns IS NULL OR r.namespace=$ns) "
+        "WHERE r.invalid_at > datetime() AND ($ns IS NULL OR r.namespace=$ns) "
         "RETURN o.key AS k", s=s_key, rel=rel, ns=ns))
 
 
@@ -163,7 +165,7 @@ def edge_state(tx, s_key, rel, o_key, ns=None):
     rec = tx.run(
         "MATCH (s:Entity {key:$s})-[r:RELATES_TO {name:$rel}]->(o:Entity {key:$o}) "
         "WHERE ($ns IS NULL OR r.namespace=$ns) "
-        "RETURN r.invalid_at IS NULL AS current", s=s_key, rel=rel, o=o_key, ns=ns).single()
+        "RETURN r.invalid_at > datetime() AS current", s=s_key, rel=rel, o=o_key, ns=ns).single()
     return None if rec is None else rec["current"]
 
 
@@ -174,7 +176,7 @@ def dirty_state(tx, key):
 
 
 # ── demo / acceptance test (isolated namespace, self-cleaning) ───────────────
-TNS = "mut_test"          # throwaway namespace; live data (16 nodes) untouched
+TNS = "mut_test"          # throwaway namespace; live data untouched
 T0, T1, T2 = "2026-06-04T00:00:00Z", "2026-06-04T01:00:00Z", "2026-06-04T02:00:00Z"
 
 

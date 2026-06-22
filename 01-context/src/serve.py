@@ -5,26 +5,36 @@ edge query, role-scoped by namespace and validity+freshness stamped. Nothing fac
 cached — the card is built per request, so it is always current (PART 3-B).
 """
 import re
+import yaml
+from pathlib import Path
 from neo4j import GraphDatabase
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+# arity:1 relations — a functional relation with >1 current edge is an exactly-one-current breach
+# that reconcile must quarantine (ambiguous_functional). Sourced from the rule contract, not hardcoded.
+FUNCTIONAL_RELS = {r for r, spec in
+                   yaml.safe_load((Path(__file__).parent.parent / "schema" / "relations.yaml").read_text())["relations"].items()
+                   if spec.get("arity") == 1}
 
-# Role-scoped, validity-stamped node-card. as_of=None => now.
+# Role-scoped node-card. SENTINEL contract: current = invalid_at > t. as_of=None => now.
+# Default returns the CURRENT view; as_of=<ISO> returns the point-in-time view (valid_at <= t < invalid_at).
 NODE_CARD = """
 MATCH (i:Entity {key:$key}) WHERE i.namespace IN $allowed
 OPTIONAL MATCH (i)-[r:RELATES_TO]->(o:Entity)
   WHERE r.namespace IN $allowed AND o.namespace IN $allowed
+    AND r.valid_at <= coalesce(datetime($as_of), datetime())
+    AND r.invalid_at > coalesce(datetime($as_of), datetime())
 WITH i, r, o ORDER BY r.name, o.key
 RETURN i.key AS node, i.long_context AS long_context, coalesce(i.dirty,false) AS fresh_dirty,
   [x IN collect(CASE WHEN r IS NULL THEN NULL ELSE {
      fact: r.name + ' -> ' + o.key,
-     validity: CASE WHEN r.invalid_at IS NULL THEN 'current' ELSE 'historical' END,
+     validity: 'current',
      valid_at: toString(r.valid_at)
    } END) WHERE x IS NOT NULL] AS facts
 """
 
-def node_card(key, allowed):
+def node_card(key, allowed, as_of=None):
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
-        rec = s.run(NODE_CARD, key=key, allowed=allowed).single()
+        rec = s.run(NODE_CARD, key=key, allowed=allowed, as_of=as_of).single()
         return rec.data() if rec else None
 
 
@@ -156,7 +166,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False):
         rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed).single()
         facts = stamp.stamp_card(rec)
         node_fresh = "stale" if rec["node_dirty"] else "fresh"
-        card = reconcile.reconcile(node_fresh, facts)
+        card = reconcile.reconcile(node_fresh, facts, FUNCTIONAL_RELS)
         trace["stamp_reconcile"] = {"node_fresh": node_fresh, "n_current": card["n_current"],
                                     "n_superseded": card["n_superseded"], "actionable": card["actionable"]}
 

@@ -28,7 +28,7 @@ def graph_rung(s, allowed, pattern):  # instant structural MATCH, role-scoped, c
     # namespace-scope ALL three: subject, edge AND object (object filter was the codex leak #3).
     q = ("MATCH (i:Entity)-[r:RELATES_TO]->(o:Entity) "
          "WHERE i.namespace IN $allowed AND r.namespace IN $allowed AND o.namespace IN $allowed "
-         "  AND r.name=$rel AND o.key=$obj AND r.invalid_at IS NULL "
+         "  AND r.name=$rel AND o.key=$obj AND r.invalid_at > datetime() "
          "RETURN i.key AS hit ORDER BY hit")
     return [rec["hit"] for rec in s.run(q, allowed=allowed, rel=pattern["rel"], obj=pattern["obj"])]
 

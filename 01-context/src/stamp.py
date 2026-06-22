@@ -2,7 +2,7 @@
 that drops superseded facts, and an action gate that refuses to act on stale/superseded facts.
 
 READ-side only (no mutation). Extends serve.py's node-card so every fact carries:
-  validity in {current, historical}  — current = edge.invalid_at IS NULL (bi-temporal)
+  validity in {current, historical}  — current = edge.invalid_at > now (SENTINEL contract, bi-temporal)
   fresh    in {fresh, stale}         — stale = the card's source node is dirty (content changed,
                                        re-embed pending, PART 3-B) so recall may be out of date
 The freshness judge drops historical facts; the action gate ALLOWS only current+fresh, else REFUSE.
@@ -24,7 +24,7 @@ OPTIONAL MATCH (i)-[r:RELATES_TO]->(o:Entity)
 RETURN coalesce(i.dirty,false) AS node_dirty,
   [x IN collect(CASE WHEN r IS NULL THEN NULL ELSE {
      fact: r.name + ' -> ' + o.key,
-     validity: CASE WHEN r.invalid_at IS NULL THEN 'current' ELSE 'historical' END
+     validity: CASE WHEN r.invalid_at > datetime() THEN 'current' ELSE 'historical' END
    } END) WHERE x IS NOT NULL] AS facts
 """
 

@@ -53,7 +53,7 @@ Two orthogonal structures combine: the **tier hierarchy** (T0–T3, classificati
    - **short_context** — short description: title, type, 1-line "what this node is about". → graph index + cheapest context injection.
    - **long_context** — *longer description*: a fuller summary/abstract of the node (more than short; still a description, **NOT** the raw chunks). → node-level vector recall (embed this) + mid-tier injection. **PageIndex does NOT use `long_context`** — it builds its own ToC tree over `chunks`/source doc via `pageindex_ref` (PART 2). [residual fix, post-the agent fleet-review]
    - **chunks** — *separate* property holding the actual source content: a **single chunk** if the node fit one, or a **group of N chunks** if split (`chunk_count`). → fine-grained retrieval target (chunk-level vector / PageIndex leaves). Single-chunk → return directly; multi-chunk → vector/PageIndex *within* the group.
-   - **temporal (BI-TEMPORAL, on facts/edges + node validity)** — `valid_at`/`invalid_at` (**event time**: when the fact became true / stopped being true *in the world*) + `created_at`/`expired_at` (**transaction time**: when *we* ingested / retracted it). Graphiti's exact 4-field model (arxiv 2501.13956 + `graphiti_core/edges.py`, paper-walked); = the canonical SQL:2011 bitemporal pattern. → **"as-of T"** = range filter `valid_at ≤ T AND (invalid_at > T OR NULL)` on the graph range-index — instant, no LLM. **Supersession = invalidate-don't-delete**: a contradicting fact sets the old edge's `invalid_at = new.valid_at` (+ `expired_at = now()`), keeping full history queryable. This REPLACES the bare `source_timestamp` (which captured only transaction time and couldn't answer "valid as-of" or "what superseded what").
+   - **temporal (BI-TEMPORAL, on facts/edges + node validity)** — `valid_at`/`invalid_at` (**event time**: when the fact became true / stopped being true *in the world*) + `created_at`/`expired_at` (**transaction time**: when *we* ingested / retracted it). Graphiti's exact 4-field model (arxiv 2501.13956 + `graphiti_core/edges.py`, paper-walked); = the canonical SQL:2011 bitemporal pattern. → **"as-of T"** = range filter `valid_at ≤ T AND invalid_at > T` (SENTINEL contract: a current edge's invalid_at = 9999-12-31, so no NULL branch) on the graph range-index — instant, no LLM. **Supersession = invalidate-don't-delete**: a contradicting fact sets the old edge's `invalid_at = new.valid_at` (+ `expired_at = now()`), keeping full history queryable. This REPLACES the bare `source_timestamp` (which captured only transaction time and couldn't answer "valid as-of" or "what superseded what").
    - **freshness stamps (for semantic-drift tracking — PART 3-B)** — `summary_at`, `embedded_at`, `embedding_model`, `dirty:bool`, `fact_rev:int`. The derived artifacts (short/long_context, embedding) are computed at ingest and decay as the node's facts/neighbors change; these stamps let the freshness sweep detect + lazily refresh stale meaning. `dirty` is set whenever a `:RELATES_TO` touching the node is added/invalidated.
 4. **Chunking by source type:** prose/docs → **contextual chunking** (−49% failure, −67% +rerank; Anthropic); code → **AST/symbol-boundary** (never split a function — split-facts failure). Alt to benchmark: **late chunking** (Jina). Chunks land in `chunks`; `long_context` remains summary/abstract only.
 5. **Embed — two granularities:** (a) embed **long_context** (the description) → node-level vector for coarse "which node" recall; (b) embed **chunks** → chunk-level vector for fine "which passage" recall. EmbeddingGemma-300M local ($0) default; gemini-embedding-001 when quality > cost. Vectors stored **on the node** (single store).
@@ -115,7 +115,7 @@ Retrieve path resolves first to a **graph pattern**; if it does → method 1 onl
 
 ### (A) Validity lifecycle — truth change [Graphiti-grounded]
 - **On ingest:** new episode → resolve entities → extract candidate facts → **contradiction-detect** against existing CURRENT edges (same subject+relation) → invalidate superseded (set `invalid_at`+`expired_at`, keep for history) → add new edge.
-- **At retrieval:** every fact stamped `validity ∈ {current (invalid_at NULL), historical (invalid_at set), as-of-T}`. Default queries return CURRENT only; "as-of T" and "what changed" use the bi-temporal filter (Cypher below).
+- **At retrieval:** every fact stamped `validity ∈ {current (invalid_at > now, sentinel-stamped), historical (invalid_at <= now), as-of-T}`. Default queries return CURRENT only; "as-of T" and "what changed" use the bi-temporal filter (Cypher below).
 
 ### (B) Freshness lifecycle — semantic drift [design-synthesis; revised after adversarial review]
 *As new context accrues, a node's meaning can drift.* **Resolution (fixes the embedding-hop-count contradiction the codex pass caught): split the STABLE semantic layer from the VOLATILE relational layer, so the embedding is genuinely 0-hop and a whole staleness class disappears:**
@@ -170,7 +170,7 @@ SET r.invalid_at=datetime($t), r.expired_at=datetime();   // tombstone, keep his
 ```
 ```cypher
 // functional supersession — rule-driven, no LLM
-MATCH (s {key:$s})-[old:STATUS]->() WHERE old.invalid_at IS NULL
+MATCH (s {key:$s})-[old:STATUS]->() WHERE old.invalid_at > datetime($t)
 SET old.invalid_at=datetime($t), old.expired_at=datetime()
 WITH s MERGE (n:Status {key:$new}) MERGE (s)-[:STATUS {valid_at:datetime($t)}]->(n);
 ```
@@ -185,16 +185,16 @@ Every evidence item returns `{validity: current|historical|superseded, fresh: cl
 ```cypher
 // Supersede (truth change): invalidate old fact in place + add new + mark node dirty
 MATCH (s:Entity {uuid:$subj})-[old:RELATES_TO {name:$rel}]->(:Entity)
-WHERE old.invalid_at IS NULL AND old.expired_at IS NULL
+WHERE old.invalid_at > datetime($t) AND old.expired_at IS NULL
 SET old.invalid_at=datetime($t), old.expired_at=datetime()
 WITH s MATCH (o:Entity {uuid:$new_obj})
 CREATE (s)-[:RELATES_TO {uuid:$f, name:$rel, fact:$fact,
-   valid_at:datetime($t), invalid_at:null, created_at:datetime(), expired_at:null}]->(o)
+   valid_at:datetime($t), invalid_at:datetime('9999-12-31T00:00:00Z'), created_at:datetime(), expired_at:null}]->(o)
 SET s.dirty=true, s.fact_rev=coalesce(s.fact_rev,0)+1, o.dirty=true;
 
 // As-of T (validity): facts true at event-time T
 MATCH (s:Entity)-[f:RELATES_TO]->(o:Entity)
-WHERE f.valid_at <= datetime($T) AND (f.invalid_at IS NULL OR f.invalid_at > datetime($T))
+WHERE f.valid_at <= datetime($T) AND f.invalid_at > datetime($T)
 RETURN s,f,o;
 
 // Freshness sweep: nodes whose meaning may have drifted since last embed

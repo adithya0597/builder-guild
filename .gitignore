@@ -41,3 +41,11 @@ logs/
 *.swp
 .idea/
 .vscode/
+graphify-out/
+
+# Local audits — may document unpatched gaps; keep out of the public tree until fixed/genericized
+audits/
+
+# Beads issue tracker — local project management; issues.jsonl references git-ignored audits/ and
+# internal decisions, so keep the whole tracker out of the public repo.
+.beads/

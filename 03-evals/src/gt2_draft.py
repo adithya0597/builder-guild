@@ -29,7 +29,7 @@ def _slice(s):
     rows = s.run(
         "MATCH (n:Entity) WHERE n.namespace IN ['engineering','finance'] "
         "RETURN n.key AS k, n.namespace AS ns, n.long_context AS ctx, "
-        "  [(n)-[r:RELATES_TO]->(o) WHERE r.invalid_at IS NULL | [r.name, o.key]] AS edges").data()
+        "  [(n)-[r:RELATES_TO]->(o) WHERE r.invalid_at > datetime() | [r.name, o.key]] AS edges").data()
     g = {}
     for r in rows:
         ctx = r["ctx"] or ""
