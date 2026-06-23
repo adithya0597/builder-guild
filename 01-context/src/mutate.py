@@ -69,7 +69,12 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
     FIX-RACE (the Context-Engineering epic): any arity:1 path takes an exclusive subject-node write-lock first
     (pure write, no read-upgrade deadlock) so concurrent writers serialize -> exactly one current.
     """
-    rule = RULES[rel]
+    try:
+        rule = RULES[rel]
+    except KeyError:
+        # unknown/mis-cased relation -> ValueError so etl.ingest dead-letters this ONE fact
+        # rather than KeyError halting the whole batch (KeyError is not a ValueError).
+        raise ValueError(f"unknown relation '{rel}' — not in relations.yaml")
     arity = rule["arity"]
     overflow = rule["overflow_policy"]
     temporal = rule["temporal"]

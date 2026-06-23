@@ -6,6 +6,7 @@
 neo4j>=5.26          # Apache-2.0  (Python driver; the Neo4j DB runs as a separate process)
 neo4j-graphrag       # Apache-2.0
 networkx             # BSD-3-Clause — default community-detection backend
+pyyaml               # MIT — serve.py + reconcile load relations.yaml (FUNCTIONAL_RELS); the default serve path needs it
 
 # Optional, higher-quality Leiden community detection lives in
 # requirements-leiden.txt and pulls GPL deps. communities.py uses algo="auto",
