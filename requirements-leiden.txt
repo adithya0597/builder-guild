@@ -16,5 +16,5 @@
 # A commercial Builder Guild license (see DUAL_LICENSE.md) does NOT relicense
 # these third-party GPL packages. To keep your deployment free of third-party
 # copyleft, stay on the default networkx backend.
-leidenalg
-python-igraph
+leidenalg==0.12.0
+python-igraph==1.0.0

@@ -1,5 +1,5 @@
 # Builder Guild — dev / eval / optional dependencies (NOT required for the core serve path).
 # Install on top of requirements.txt:  pip install -r requirements.txt -r requirements-dev.txt
 # All permissive (BSD / Apache-2.0), kept separate so a minimal core install stays lean.
-numpy                 # BSD-3-Clause — founder-gate calibration (03-evals/src/cal3_fit.py, cal4_sweep.py)
-sentence-transformers # Apache-2.0 — optional cross-encoder rerank (fuse.py); NOT invoked on the default serve() path
+numpy==2.5.0                 # BSD-3-Clause — founder-gate calibration (03-evals/src/cal3_fit.py, cal4_sweep.py)
+sentence-transformers==5.6.0 # Apache-2.0 — optional cross-encoder rerank (fuse.py); NOT invoked on the default serve() path

@@ -3,10 +3,10 @@
 # All core deps are permissive (Apache-2.0 / BSD-3). This keeps the AGPL-licensed
 # core free of third-party copyleft, so it can ALSO be offered under a separate
 # commercial license (see DUAL_LICENSE.md) without entanglement.
-neo4j>=5.26          # Apache-2.0  (Python driver; the Neo4j DB runs as a separate process)
-neo4j-graphrag       # Apache-2.0
-networkx             # BSD-3-Clause — default community-detection backend
-pyyaml               # MIT — serve.py + reconcile load relations.yaml (FUNCTIONAL_RELS); the default serve path needs it
+neo4j==6.2.0           # Apache-2.0  (Python driver; the Neo4j DB runs as a separate process; tested green vs Neo4j 5.26 server in CI)
+neo4j-graphrag==1.17.0 # Apache-2.0
+networkx==3.6.1        # BSD-3-Clause — default community-detection backend
+pyyaml==6.0.3          # MIT — serve.py + reconcile load relations.yaml (FUNCTIONAL_RELS); the default serve path needs it
 
 # Optional, higher-quality Leiden community detection lives in
 # requirements-leiden.txt and pulls GPL deps. communities.py uses algo="auto",
