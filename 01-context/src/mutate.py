@@ -29,13 +29,14 @@ RULES = yaml.safe_load((Path(__file__).parent.parent / "schema" / "relations.yam
 
 
 def resolve_entity(tx, label, key, now, ns, short="", long_="", ep=None):
-    """resolve = idempotent MERGE of a keyed entity. content_rev starts at 0, dirty cleared.
+    """resolve = idempotent MERGE of a keyed entity. content_rev starts at 0; dirty is cleared
+    ON CREATE only — a resolve never clobbers a concurrent mark_dirty (afh dirty-flag race fix).
     namespace is set ON CREATE only — a re-ingest under a DIFFERENT namespace is an isolation
     violation and raises (ownership never silently moves)."""
     rec = tx.run(
         f"MERGE (n:Entity:{label} {{key:$key}}) "
-        "ON CREATE SET n.created_at=datetime($now), n.content_rev=0, n.namespace=$ns "
-        "SET n.short_context=$short, n.long_context=$long, n.dirty=false "
+        "ON CREATE SET n.created_at=datetime($now), n.content_rev=0, n.namespace=$ns, n.dirty=false "
+        "SET n.short_context=$short, n.long_context=$long "
         "RETURN n.namespace AS ns",
         key=key, now=now, ns=ns, short=short, long=long_).single()
     if rec["ns"] != ns:
@@ -68,8 +69,17 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
 
     FIX-RACE (the Context-Engineering epic): any arity:1 path takes an exclusive subject-node write-lock first
     (pure write, no read-upgrade deadlock) so concurrent writers THROUGH THIS ENGINE serialize -> exactly one
-    current. This is a CONVENTION, not a DB constraint: a writer that bypasses apply_edge can still create a
-    2nd current edge with no error — invariant_check.py is the whole-graph backstop sweep (gated in CI; run as a periodic ops sweep too).
+    current.
+
+    WRITE GATEWAY (crk): apply_edge is the SOLE SANCTIONED entrypoint for RELATES_TO current-edge mutations.
+    No module may hand-write a current RELATES_TO edge (CREATE/MERGE ... invalid_at=SENTINEL) outside this
+    function; tools/check_write_gateway.py is a CI grep-gate that rejects any such bypass (the only allowlisted
+    handwritten edges are the adversarial self-test fixtures in invariant_check.py / cycle_check.py, which inject
+    violations on purpose to prove detection fires). This is APPLICATION-ENFORCED, never DB-enforced: Neo4j
+    community cannot express a predicate constraint like "exactly one CURRENT edge", so the guarantee is
+    "single writer at the app boundary + continuous detection", NOT "the database prevents a 2nd current edge".
+    Whole-graph backstops: invariant_check.py (>1-current per arity:1 subject) and cycle_check.py (cycles over
+    graph_invariant rels) — gated in CI and run as periodic ops sweeps.
     """
     try:
         rule = RULES[rel]

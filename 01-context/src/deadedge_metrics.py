@@ -1,6 +1,6 @@
 """Dead-edge instrument (builder-guild-1nb): measure the trigger signals that decide WHEN the
 bi-temporal graph's historical (superseded) RELATES_TO edges stop being free to keep in the hot
-graph. Decision (founder 2026-06-22, audits/DEAD_EDGE_DECISION_MEMO.md): STAY HOT until a MEASURED
+graph. Decision (founder 2026-06-22): STAY HOT until a MEASURED
 trigger — this script IS that measurement, so "stay hot" is data-driven, not indefinite.
 
 READ-ONLY: every query is a MATCH / EXPLAIN / CALL; the script never writes. Safe against live.

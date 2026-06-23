@@ -40,7 +40,7 @@ def sweep_once(drv, now, batch=100):
 
 
 def demo():
-    from mutate import resolve_entity, mark_dirty
+    from mutate import resolve_entity, mark_dirty, apply_edge
     from embed import embed_node
     NS, T0, T1 = "sweep_test", "2026-06-04T00:00:00Z", "2026-06-04T01:00:00Z"
     fail = []
@@ -53,9 +53,9 @@ def demo():
             s.execute_write(lambda tx: resolve_entity(tx, "Episodic", "sw:B", T0, NS, short="B", long_="neighbour about logging"))
             s.execute_write(lambda tx: embed_node(tx, "sw:A", "initial content about caching", "prose", T0))
             s.execute_write(lambda tx: embed_node(tx, "sw:B", "neighbour about logging", "prose", T0))
-            s.execute_write(lambda tx: tx.run("MATCH (a:Entity{key:'sw:A'}),(b:Entity{key:'sw:B'}) "
-                                              "MERGE (a)-[r:RELATES_TO {name:'RELATED_TO',namespace:$ns}]->(b) "
-                                              "ON CREATE SET r.valid_at=datetime(), r.created_at=datetime(), r.invalid_at=datetime('9999-12-31T00:00:00Z')", ns=NS))
+            # crk/n3y: route the fixture edge through the single write engine (apply_edge) with an
+            # EXPLICIT clock T0 — no handwritten current-edge write, no ambient datetime() (was the 2nd clock-split).
+            s.execute_write(lambda tx: apply_edge(tx, "sw:A", "RELATED_TO", "sw:B", T0, NS))
 
             before = s.run("MATCH (n:Entity{key:'sw:A'}) RETURN n.embedding AS v, n.content_rev AS cr, n.embedded_content_rev AS ecr").single()
             b_before = s.run("MATCH (n:Entity{key:'sw:B'}) RETURN n.embedded_at AS at, n.embedding AS v").single()

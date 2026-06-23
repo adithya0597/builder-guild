@@ -32,6 +32,12 @@ dumps/
 03-evals/src/cal3_judge.jsonl
 03-evals/src/cal4_progress.jsonl
 
+# gt2_draft.py golden DRAFT outputs — machine-generated, pending human validation. Only the
+# human-validated 03-evals/example_golden.jsonl is committed (2fj). NOTE: golden_v1_draft.jsonl +
+# golden_v1_review.md stay TRACKED on purpose — the founder grant flow reads them (README founder gate).
+03-evals/src/golden_v0_draft.jsonl
+03-evals/src/golden_v0_review.md
+
 # Logs
 *.log
 logs/

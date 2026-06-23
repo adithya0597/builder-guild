@@ -47,11 +47,16 @@ jobs:
           grep -q EVIDENCE_OK /tmp/evidence.log
           python 01-context/src/pageindex_adapter.py | tee /tmp/pageindex.log
           grep -q PAGEINDEX_ADAPTER_OK /tmp/pageindex.log
+      - name: write-gateway gate (crk — reject handwritten current-edge writes outside mutate.apply_edge)
+        run: |
+          python tools/check_write_gateway.py | tee /tmp/gateway.log
+          grep -q WRITE_GATEWAY_OK /tmp/gateway.log
 
   graph:
-    # Real Neo4j. Gates the ingest/write engine + read-only instrument: seed schema ->
-    # spine ingest + node-card read-back -> mutate/namespace-isolation -> dead-edge metric.
-    # The serve()/retrieval ANSWER path is NOT exercised here yet.
+    # Real Neo4j. Gates the ingest/write engine + invariant backstops: seed schema -> spine ingest
+    # + node-card read-back -> mutate/namespace-isolation -> dead-edge metric -> single-current +
+    # cycle detection sweeps (each with a self-test) -> sentinel migration guard. The serve()/
+    # retrieval ANSWER path is NOT exercised here yet.
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -86,3 +91,11 @@ jobs:
           grep -q SINGLE_CURRENT_OK /tmp/invariant.log
           python 01-context/src/invariant_check.py --self-test | tee /tmp/invariant_st.log
           grep -q INVARIANT_SELFTEST_OK /tmp/invariant_st.log
+          python 01-context/src/cycle_check.py | tee /tmp/cycle.log
+          grep -q CYCLE_CHECK_OK /tmp/cycle.log
+          python 01-context/src/cycle_check.py --self-test | tee /tmp/cycle_st.log
+          grep -q CYCLE_SELFTEST_OK /tmp/cycle_st.log
+          python tools/run_guard.py 01-context/schema/07_sentinel_migration.cypher | tee /tmp/guard.log
+          grep -q GUARD_OK /tmp/guard.log
+          python tools/run_guard.py --self-test | tee /tmp/guard_st.log
+          grep -q GUARD_SELFTEST_OK /tmp/guard_st.log

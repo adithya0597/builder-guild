@@ -2,7 +2,7 @@
 
 For each of the 10 validated golden items: run the live serve(question, role), pull the gate's
 own (sufficiency, self_confidence) from its trace, and label whether serve's answer was CORRECT
-vs the human gold — deterministic-first (ID/enum/set/abstain matchers), hermes judge (3-trial
+vs the human gold — deterministic-first (ID/enum/set/abstain matchers), LLM judge (3-trial
 majority) ONLY for the 2 prose items. Fit the sufficiency x confidence logistic on those REAL
 (signal, signal, correct) rows; report selective accuracy vs the confidence-only baseline; derive
 TAU* under the FOUNDER-LOCKED loss ratio C(wrong act):C(missed act) = 10:1 (routine actions;
@@ -10,6 +10,14 @@ irreversible/security remain categorically human-gated in gate.py and lease no a
 
 DOES NOT FLIP CALIBRATED (governance: founder flips, V0 flips nothing). Fitted weights go to the
 evidence packet, not abstain.py. N=10 — every number below is a SMOKE-scale measurement.
+
+SERVE-JOIN SCOPE (6gw): this fits the gate on the GRAPH-ONLY serve() path (deep_serve defaults
+OFF). It does NOT fit weights on the serve-join / deep_serve (PageIndex) path — a deep_serve REFIT
+needs a real PageIndex deployment + a prose-augmented golden, neither of which exists in the public
+mirror. The serve-join path itself IS validated separately: serve.py's INT3_OK demo exercises the
+deep_serve=True positive path (deep_fired + deep_augmented) and the $0 default-off law via the
+pageindex_adapter stub, and PAGEINDEX_ADAPTER_OK gates the drill contract in CI. So serve-join is
+MECHANISM-validated, not yet CALIBRATION-fitted (refit deferred, tracked).
 """
 import argparse
 import json
@@ -160,6 +168,13 @@ def main(argv=None):
     print(f"[gate]    abstain.CALIBRATED={abstain.CALIBRATED} all_false={all_false} untouched={untouched} "
           f"(founder flips, not this)")
     fail += [] if untouched else ["CAL-3 must not mutate abstain.py"]
+    # rmm: the wrong-act guard is only meaningful if the slice HAS should-not-act candidates AND the
+    # gate actually acts on something — else wrong_act==0 is vacuously true (degenerate-satisfiable).
+    n_should_not_act = int((should_act == 0).sum())
+    fail += [] if n_should_not_act >= 1 else [
+        "degenerate golden: 0 should-not-act candidates — the wrong-act guard would pass vacuously"]
+    fail += [] if int(act.sum()) >= 1 else [
+        f"degenerate TAU*={tau_star:.2f}: gate acts on 0/{len(should_act)} items (all withheld) — wrong-act guard vacuous"]
     fail += [] if wrong_act == 0 else [f"TAU* under 10:1 must zero wrong-acts on this slice (got {wrong_act})"]
 
     out = {"rows": rows, "fit": {"W_SUFFICIENCY": w_s, "W_CONFIDENCE": w_c, "BIAS": b},

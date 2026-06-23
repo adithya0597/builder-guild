@@ -7,8 +7,8 @@ Ordered by what the last calibration run proved is missing (see
 
 RAG-pattern coverage (see `01-context/RETRIEVAL.md` + `HYBRID_RETRIEVAL_ARCHITECTURE.md`):
 - **Hybrid RAG** — ✅ shipped (keyword + graph + vector ladder, RRF fusion).
-- **GraphRAG** — ✅ shipped; the community-summaries gap is closed (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven).
-- **Corrective RAG** — ✅ shipped; the recovery half is closed (`01-context/src/corrective.py`, bounded rewrite→re-retrieve + $0-or-STOP web fallback).
+- **GraphRAG** — ✅ shipped; communities exist as a standalone module, NOT wired into the live serve() path (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven).
+- **Corrective RAG** — ✅ shipped; corrective_serve() exists but is NOT the default serve() path (it wraps serve()) (`01-context/src/corrective.py`, bounded rewrite→re-retrieve + $0-or-STOP web fallback).
 - **Agentic RAG** — ◐ PARTIAL (mechanism only) → gap **G1** below.
 - **Multimodal RAG** — ✗ NOT built (text-only) → gap **G2** below.
 

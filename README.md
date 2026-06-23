@@ -7,8 +7,9 @@ store where facts are explicit, typed, point-in-time-queryable, and isolated per
 **no LLM ever writes a fact** (zero hallucinated state), and **no metric certifies itself**
 (every gate threshold is measured against human-validated ground truth, never asserted).
 
-> **Status:** context + retrieval layer integrated end-to-end on a live graph (23-module regression
-> green); evaluation layer ran its first real calibration — and correctly **refused** to certify
+> **Status:** context + retrieval layer integrated end-to-end on the synthetic demo graph (`python src/etl.py`
+> → `python src/serve.py demo`), with CI gating a full import smoke + the ingest/write engine and
+> invariant sweeps on a real Neo4j; evaluation layer ran its first real calibration — and correctly **refused** to certify
 > autonomy (see the [case study](03-evals/CASE_STUDY_calibration.md)). The agent layer is the
 > design + contract + a demo consumer; fleet orchestration is roadmap.
 

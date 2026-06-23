@@ -4,7 +4,11 @@ Asks through serve() (the ONLY read path), acts only via the gate's decision, re
 action-audit row. Run with PYTHONPATH including 01-context/src and 02-agents/src, against the
 demo graph (01-context/src/etl.py). Prints DEMO_AGENT_OK.
 """
+import os
 import sys
+# ox5: make the script self-contained — serve lives in 01-context/src; fix_decision/planner in 02-agents/src
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "01-context", "src"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 02-agents/src (fix_decision, planner)
 from serve import serve
 from fix_decision import record_decision, attach_outcome
 from planner import plan

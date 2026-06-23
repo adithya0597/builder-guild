@@ -4,7 +4,9 @@ sources (graph index / vector recall / PageIndex), per HYBRID_RETRIEVAL_ARCHITEC
 Stage 1 — RRF: rank-based, scale-free fusion that sidesteps BM25-vs-cosine score normalization
   (Cormack & Clarke SIGIR 2009). score(d) = Σ_sources 1/(k + rank_source(d)), k=60.
 Stage 2 — cross-encoder rerank: re-score the fused top-N by true (query, passage) relevance
-  (ms-marco-MiniLM-L-6-v2; the bge/Qwen3/Cohere class). Runs whenever ≥2 methods fire.
+  (ms-marco-MiniLM-L-6-v2; the bge/Qwen3/Cohere class). AVAILABLE in cross_encoder_rerank() but NOT
+  invoked by the default serve() path (serve() does RRF only; needs sentence-transformers, a dev dep).
+  Wiring it into serve() is roadmap item 6 (docs/ROADMAP.md, Mid).
 """
 import sys
 

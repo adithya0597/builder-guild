@@ -12,7 +12,7 @@ confirms/corrects it into `correct_answer` and flips `validated`. The agent neve
 unvalidated answer as ground truth and never closes GT-5.
 
 Output:
-  example_golden.jsonl       — the drafts (machine format, golden.py schema)
+  golden_v0_draft.jsonl     — the drafts (machine format, golden.py schema; gitignored, NOT the canonical)
   golden_v0_review.md   — the human review sheet for Adithya (question, candidate, support-facts)
 """
 import os
@@ -49,8 +49,8 @@ def draft(g):
         items.append(it)
 
     # ---- NORMAL: single-hop (RAGAS ~50%) ----
-    add(normal_item("eng-s1", "engineering", "Who is issue SPI-2 (rate-limit backoff for Hermes "
-                    "inference) assigned to?", "single",
+    add(normal_item("eng-s1", "engineering", "Who is issue SPI-2 (rate-limit backoff for the inference "
+                    "client) assigned to?", "single",
                     ["issue:SPI-2", ["issue:SPI-2", "ASSIGNED_TO", g["issue:SPI-2"]["assignee"]]],
                     "GT-2 auto-draft"), f"CANDIDATE: {g['issue:SPI-2']['assignee']}")
     add(normal_item("eng-s2", "engineering", "What is the current status of SPI-2?", "single",
@@ -107,7 +107,7 @@ def write_review(items, path):
              "> Auto-drafted by GT-2 from the live engineering+finance graph slice. Each",
              "> item's `candidate_answer` is GRAPH-DERIVED but UNVALIDATED. **Adithya:** for each item,",
              "> confirm or correct the candidate, then set `correct_answer` + `validated=true` in",
-             "> `example_golden.jsonl`. Do not trust a candidate until you've checked it against the graph.",
+             "> `golden_v0_draft.jsonl` (then promote the validated set to the canonical `example_golden.jsonl`). Do not trust a candidate until you've checked it against the graph.",
              "", f"**{len(items)} drafts** | "
              f"normal={sum(1 for i in items if i['kind']=='normal')} "
              f"null={sum(1 for i in items if i['kind']=='null')} "
@@ -160,8 +160,9 @@ def main():
     print(f"[ground]  support_facts referencing non-slice nodes: {bad_refs if bad_refs else 'NONE'}")
     fail += [] if not bad_refs else [f"ungrounded support_facts: {bad_refs}"]
 
-    # write artifacts
-    jpath = write_golden(items, os.path.join(HERE, "example_golden.jsonl"))
+    # write artifacts — 2fj: write clearly-named DRAFTS (gitignored), never the human-validated
+    # canonical 03-evals/example_golden.jsonl, and never a 2nd copy under src/ that nothing reads.
+    jpath = write_golden(items, os.path.join(HERE, "golden_v0_draft.jsonl"))
     rpath = write_review(items, os.path.join(HERE, "golden_v0_review.md"))
     back = read_golden(jpath)
     print(f"[write]   {os.path.basename(jpath)} ({len(back)} items) + {os.path.basename(rpath)}")
