@@ -4,7 +4,7 @@ Pluggable $0-or-STOP web branch. OFF by default. Mirrors judge_adapter.py.
 
 Environment:
     CORRECTIVE_WEB_ENABLED   default "false" — must be "true" to activate
-    CORRECTIVE_WEB_CMD       the one-shot CLI (e.g. a hermes/codex-style CLI)
+    CORRECTIVE_WEB_CMD       the one-shot CLI (e.g. a codex-style one-shot CLI)
     CORRECTIVE_WEB_MODEL     model to pass to the CLI
 
 One-shot: $CMD -z <prompt> -m $MODEL

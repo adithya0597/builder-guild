@@ -4,7 +4,7 @@ single homogeneous set. See SERVE_JOIN_DESIGN.md §1-§3.
 
 SHARED CONTRACT: this module is byte-identical in the private spine and the public mirror. The
 serve-join consumes it in BOTH trees; only the PageIndex ADAPTER differs (private = the real
-pageindex_nav.py worker; public = a stubbed interface). Do NOT diverge this file between trees.
+deep-retrieval worker; public = a stubbed interface). Do NOT diverge this file between trees.
 
 v1 is NARROW by decision (founder, 2026-06-17): exactly 11 fields, every one populated by a real
 producer. `evidence_id` and the :Episodic provenance link are NAMED FOR LATER, not v1 fields —

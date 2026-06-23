@@ -14,7 +14,7 @@ import time
 
 from h2b3_judge import assert_no_self_family
 
-JUDGE_CMD = os.path.expanduser(os.environ.get("JUDGE_CMD", "judge-cli"))   # e.g. a hermes/codex-style one-shot CLI
+JUDGE_CMD = os.path.expanduser(os.environ.get("JUDGE_CMD", "judge-cli"))   # e.g. a codex-style one-shot CLI
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gpt-5.4")
 GENERATOR_MODEL = "claude-opus-4-8"          # the Claude family that authored answers/drafts
 assert_no_self_family(JUDGE_MODEL, GENERATOR_MODEL)
@@ -23,7 +23,7 @@ _JSON_RE = re.compile(r"\{[^{}]*\}")
 
 
 def _call(prompt, retries=3, timeout=180):
-    """One hermes judge call -> (parsed_json, latency_s). Exponential backoff on failure."""
+    """One judge CLI call -> (parsed_json, latency_s). Exponential backoff on failure."""
     last = None
     for attempt in range(retries):
         t0 = time.time()
@@ -111,7 +111,7 @@ def smoke():
                          key="smoke-1", ckpt=ck)
     print(f"[smoke]   verdict={v} latency={lat}s")
     ok_call = isinstance(v.get("match"), bool) and 0.0 <= v.get("confidence", -1) <= 1.0
-    # resume path: same key returns from checkpoint with no second hermes call (latency 0)
+    # resume path: same key returns from checkpoint with no second judge call (latency 0)
     v2, lat2 = score_match("Who is issue SPI-2 assigned to?", "the CTO agent", "agent:cto",
                            key="smoke-1", ckpt=ck)
     print(f"[resume]  cached verdict={v2} latency={lat2}s (must be 0.0 = no re-call)")
