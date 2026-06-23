@@ -1,0 +1,84 @@
+name: ci
+
+# Minimum-useful CI (not vanity): catch the manifest/runnability regression class on a
+# clean clone, and gate the ingest/write engine + dead-edge instrument against a real Neo4j.
+# NOTE: the serve()/retrieval ANSWER path is NOT gated here yet (tracked separately).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read          # least privilege — CI needs no write scope
+
+jobs:
+  smoke:
+    # No DB. The high-value gate: does the repo install + import from its own manifest,
+    # and do the DB-free contract demos pass? (This is the class b4fb829 / 7fa8de9 fixed.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: import smoke (all top-level modules in src + tools dirs)
+        run: |
+          python - <<'PY'
+          import importlib, pathlib, sys
+          dirs = [d for d in ("01-context/src", "02-agents/src", "03-evals/src", "tools") if pathlib.Path(d).is_dir()]
+          for d in dirs:
+              sys.path.insert(0, d)
+          mods = sorted({p.stem for d in dirs for p in pathlib.Path(d).glob("*.py") if p.stem != "__init__"})
+          bad = []
+          for m in mods:
+              try:
+                  importlib.import_module(m)
+              except Exception as e:
+                  bad.append(f"{m}: {type(e).__name__}: {e}")
+          print(f"imported {len(mods) - len(bad)}/{len(mods)}")
+          if bad:
+              print("FAILED:", *bad, sep="\n  ")
+              sys.exit(1)
+          PY
+      - name: DB-free contract demos
+        run: |
+          python 01-context/src/evidence.py | tee /tmp/evidence.log
+          grep -q EVIDENCE_OK /tmp/evidence.log
+          python 01-context/src/pageindex_adapter.py | tee /tmp/pageindex.log
+          grep -q PAGEINDEX_ADAPTER_OK /tmp/pageindex.log
+
+  graph:
+    # Real Neo4j. Gates the ingest/write engine + read-only instrument: seed schema ->
+    # spine ingest + node-card read-back -> mutate/namespace-isolation -> dead-edge metric.
+    # The serve()/retrieval ANSWER path is NOT exercised here yet.
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/companybrain
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p companybrain 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 30s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: seed schema (constraints + rel_invalid_at index)
+        run: python tools/apply_cypher.py 01-context/schema/01_constraints.cypher 01-context/schema/03_indexes.cypher
+      - name: spine + engine truth demos
+        run: |
+          python 01-context/src/etl.py | tee /tmp/etl.log
+          grep -q D1_SPINE_OK /tmp/etl.log
+          python 01-context/src/mutate.py | tee /tmp/mutate.log
+          grep -q E1_MUT_OK /tmp/mutate.log
+          python 01-context/src/deadedge_metrics.py | tee /tmp/deadedge.log
+          grep -q DEADEDGE_METRICS_OK /tmp/deadedge.log

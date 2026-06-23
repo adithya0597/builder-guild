@@ -186,6 +186,7 @@ def main():
             print("after status change: current facts:", facts2, "| dead-letter:", dl3)
             print("HAS_STATUS history (value, current):", s.execute_read(status_history, "issue:ACME-1"))
             print("LLM calls in path: 0 (pure Cypher via the single mutate.apply_edge engine)")
+            assert not (dl1 or dl2 or dl3), ("unexpected dead-letter on the clean ACME fixture", dl1, dl2, dl3)
             print("D1_SPINE_OK")
 
 
