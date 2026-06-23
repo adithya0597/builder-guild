@@ -12,8 +12,8 @@ verb-then-pattern idiom a per-line check would miss). Plain MATCH reads have no 
 they pass. This is a cheap STATIC backstop, NOT the authoritative one: a write split across >3 source
 lines, or an ad-hoc cypher-shell session, can still evade it — the AUTHORITATIVE net is the RUNTIME
 detection sweeps (invariant_check.py >1-current, cycle_check.py cycles) gated in CI + run as ops sweeps.
-Allowlisted files: mutate.py (the engine) + the invariant_check / cycle_check / run_guard self-test
-fixtures (which inject violations on purpose) + this gate itself (it carries the patterns as literals).
+Allowlisted files: mutate.py (the engine) + the invariant_check / cycle_check / run_guard / retention_sweep
+self-test fixtures (which inject violations on purpose) + this gate itself (it carries the patterns as literals).
 
 Exit 0 + WRITE_GATEWAY_OK if clean; exit 1 + the offending file:line(s) otherwise.
 """
@@ -24,8 +24,9 @@ import sys
 ROOT = pathlib.Path(__file__).parent.parent
 SCAN_DIRS = ["01-context/src", "02-agents/src", "03-evals/src", "tools"]
 # engine + adversarial self-test fixtures (invariant_check / cycle_check / run_guard inject violations
-# on purpose) + this gate itself (it carries the RELATES_TO patterns as string literals).
-ALLOWLIST = {"mutate.py", "invariant_check.py", "cycle_check.py", "run_guard.py", "check_write_gateway.py"}
+# on purpose; retention_sweep._selftest seeds raw historical+current edges to prove the prune keeps
+# current + in-window history) + this gate itself (it carries the RELATES_TO patterns as string literals).
+ALLOWLIST = {"mutate.py", "invariant_check.py", "cycle_check.py", "run_guard.py", "retention_sweep.py", "check_write_gateway.py"}
 
 WRITE_WINDOW = 3   # a CREATE/MERGE up to WRITE_WINDOW-1 concatenated string-lines ABOVE the pattern counts
 EDGE_PAT = re.compile(r"-\[\s*r?\s*:RELATES_TO")   # a RELATES_TO relationship pattern (write side)
