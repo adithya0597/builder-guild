@@ -61,14 +61,19 @@ def vector_rung(s, allowed, text, k=3):
     """Rung 2 (INT-2): real vector recall. Embed the query (local EmbeddingGemma), queryNodes the
     HNSW index, NAMESPACE-FILTER to the role's slice, cap at k. The over-fetch ESCALATES to defeat
     the recall cliff under high namespace selectivity (see _vector_query, 10o).
-    OPTIONAL-DEP RESILIENCE: vector is an escalation rung — if the local embedding dependency is
-    absent (ImportError), return [] so the graph/keyword rungs still serve (the $0/local core runs
-    without the optional embedder); the caller traces an empty vector result rather than crashing."""
+    OPTIONAL-DEP RESILIENCE: vector is an escalation rung — if the OPTIONAL embedder
+    (sentence-transformers) is absent, return [] so the graph/keyword rungs still serve (the
+    $0/local core runs without it). NARROW catch (red-team RT-1): sentence_transformers is
+    lazy-imported INSIDE embed(), so the catch must wrap embed(text) — but only a missing
+    sentence_transformers degrades; ANY OTHER ModuleNotFoundError (torch / a broken ST backend /
+    embed / neo4j) PROPAGATES, so a genuinely broken embedder can't masquerade as 'no vector hits'."""
     try:
         from embed import embed
         qv = embed(text)
-    except ImportError:
-        return []
+    except ModuleNotFoundError as e:
+        if e.name == "sentence_transformers":     # optional embedder absent -> graceful degrade
+            return []
+        raise                                     # real failure (torch/embed/neo4j/...) -> surface it
     return _vector_query(s, allowed, qv, k)
 
 
@@ -145,18 +150,20 @@ def _recall_selftest():
     NS_IN, NS_OUT = "recall_test_in", "recall_test_out"
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
         s.run("MATCH (n:Entity) WHERE n.namespace STARTS WITH 'recall_test' DETACH DELETE n")
-        for i in range(50):
-            s.run("CREATE (n:Entity {key:$k, namespace:$ns, embedding:$v})",
-                  k=f"rt:out:{i}", ns=NS_OUT, v=out_vec)
-        s.run("CREATE (n:Entity {key:'rt:in:1', namespace:$ns, embedding:$v})", ns=NS_IN, v=in_vec)
-        s.run("CALL db.awaitIndexes()")
-        # the OLD fixed k*5=5 over-fetch (simulated) misses the in-scope node = the cliff:
-        fixed = s.run(
-            "CALL db.index.vector.queryNodes('node_embedding', 5, $q) YIELD node "
-            "WHERE node.namespace = $ns RETURN node.key AS k", q=qv, ns=NS_IN).data()
-        # the ESCALATING query (the fix) finds it:
-        got = _vector_query(s, [NS_IN], qv, k=1)
-        s.run("MATCH (n:Entity) WHERE n.namespace STARTS WITH 'recall_test' DETACH DELETE n")
+        try:
+            for i in range(50):
+                s.run("CREATE (n:Entity {key:$k, namespace:$ns, embedding:$v})",
+                      k=f"rt:out:{i}", ns=NS_OUT, v=out_vec)
+            s.run("CREATE (n:Entity {key:'rt:in:1', namespace:$ns, embedding:$v})", ns=NS_IN, v=in_vec)
+            s.run("CALL db.awaitIndexes()")
+            # the OLD fixed k*5=5 over-fetch (simulated) misses the in-scope node = the cliff:
+            fixed = s.run(
+                "CALL db.index.vector.queryNodes('node_embedding', 5, $q) YIELD node "
+                "WHERE node.namespace = $ns RETURN node.key AS k", q=qv, ns=NS_IN).data()
+            # the ESCALATING query (the fix) finds it:
+            got = _vector_query(s, [NS_IN], qv, k=1)
+        finally:                                  # RT-3: crash-safe cleanup (shared local DB)
+            s.run("MATCH (n:Entity) WHERE n.namespace STARTS WITH 'recall_test' DETACH DELETE n")
     fixed_found = any(r["k"] == "rt:in:1" for r in fixed)
     esc_found = any(r["key"] == "rt:in:1" for r in got)
     print(f"[recall] fixed k*5 found in-scope? {fixed_found} (expect False = the cliff) | "

@@ -46,16 +46,18 @@ def _selftest():
     NS = "retention_test"
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
         s.run("MATCH (n) WHERE n.namespace=$ns DETACH DELETE n", ns=NS)
-        s.run("CREATE (a:Entity {key:'ret:a', namespace:$ns}) "
-              "CREATE (b:Entity {key:'ret:b', namespace:$ns}) "
-              "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2019-01-01'), invalid_at:datetime($sent)}]->(b) "
-              "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2019-01-01'), invalid_at:datetime('2020-01-01')}]->(b) "
-              "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2025-01-01'), invalid_at:datetime('2026-06-01')}]->(b)",
-              ns=NS, sent=SENTINEL)
-        cur, hist = measure(s, ns=NS)
-        pruned = prune(s, "2023-01-01", ns=NS)        # cutoff between the 2020 and 2026 historical edges
-        cur2, hist2 = measure(s, ns=NS)
-        s.run("MATCH (n) WHERE n.namespace=$ns DETACH DELETE n", ns=NS)
+        try:
+            s.run("CREATE (a:Entity {key:'ret:a', namespace:$ns}) "
+                  "CREATE (b:Entity {key:'ret:b', namespace:$ns}) "
+                  "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2019-01-01'), invalid_at:datetime($sent)}]->(b) "
+                  "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2019-01-01'), invalid_at:datetime('2020-01-01')}]->(b) "
+                  "CREATE (a)-[:RELATES_TO {name:'X', namespace:$ns, valid_at:datetime('2025-01-01'), invalid_at:datetime('2026-06-01')}]->(b)",
+                  ns=NS, sent=SENTINEL)
+            cur, hist = measure(s, ns=NS)
+            pruned = prune(s, "2023-01-01", ns=NS)        # cutoff between the 2020 and 2026 historical edges
+            cur2, hist2 = measure(s, ns=NS)
+        finally:                                          # RT-3: crash-safe cleanup (shared local DB)
+            s.run("MATCH (n) WHERE n.namespace=$ns DETACH DELETE n", ns=NS)
     print(f"[retention] seed current={cur} historical={hist} -> prune(<2023)={pruned} "
           f"-> after current={cur2} historical={hist2}")
     ok = (cur == 1 and hist == 2 and pruned == 1 and cur2 == 1 and hist2 == 1)
