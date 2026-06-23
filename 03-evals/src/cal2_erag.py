@@ -16,6 +16,9 @@ units that retrieval surfaced for an unanswerable question).
 import json
 import os
 import sys
+# ox5: golden/scope/ladder live in 01-context/src — put it on path so the script is self-contained
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "01-context", "src"))
 from neo4j import GraphDatabase
 from golden import read_golden
 from scope import allowed_namespaces

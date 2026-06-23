@@ -208,7 +208,7 @@ RETURN e.uuid, e.fact_rev ORDER BY e.fact_rev DESC;   // feed to lazy re-embed/r
 - **Open:** entity-resolution MERGE key — dedupe semantically on a resolved `uuid`, NOT on `name` (Graphiti resolves by embedding+LLM).
 
 ## 3) Fusion + rerank (only when ≥2 methods fire)
-Normalize → **RRF** `score(d)=Σ 1/(k+rank)`, **k=60** (Cormack & Clarke SIGIR 2009; rank-based = scale-free, solves BM25-vs-cosine normalization) → **cross-encoder rerank** (bge-reranker-v2 / Qwen3-reranker / Cohere class; +11% nDCG BEIR; runs whenever ≥2 methods fire; latency-budgeted in §5) → source-diversity. Pure structural (method 1 only) skips fusion.
+Normalize → **RRF** `score(d)=Σ 1/(k+rank)`, **k=60** (Cormack & Clarke SIGIR 2009; rank-based = scale-free, solves BM25-vs-cosine normalization) → **cross-encoder rerank** (bge-reranker-v2 / Qwen3-reranker / Cohere class; +11% nDCG BEIR; implemented in fuse.cross_encoder_rerank() but NOT wired into the default serve() path — roadmap item 6; latency-budgeted in §5) → source-diversity. Pure structural (method 1 only) skips fusion.
 Evidence schema (at ingest, every candidate): `evidence_id · source_id · source_path · source_type · node_id · chunk_span · retrieved_at · valid_at · invalid_at · created_at · expired_at · freshness_state · namespace · retrieval_method · raw_score · retrieval_score`.
 
 > **Naming convention (FIX-RECON / S6 — "confidence" disambiguated).** Bare `confidence` previously named three distinct quantities across layers; they are now always qualified (codified in `01-context/src/reconcile.py:RECALL_NAMING`):

@@ -101,7 +101,7 @@ load-bearing one, and re-verify exact numbers against the paper before quoting t
 
 Implementation of CRAG [2401.15884] at the serve layer. When `abstain` is returned by the grader,
 `corrective_serve()` (in `01-context/src/corrective.py`) rewrites the query deterministically
-and re-retrieves, up to `max_rewrites` distinct probes. Pure Python, $0/local — no model calls.
+and re-retrieves, up to `max_rewrites` distinct probes. NOTE (5te): `corrective_serve()` is an OPT-IN wrapper, NOT the default `serve()` path — `serve()` does not invoke the rewrite loop; call `corrective_serve()` directly when you need it. Pure Python, $0/local — no model calls.
 
 **Loop shape:**
 

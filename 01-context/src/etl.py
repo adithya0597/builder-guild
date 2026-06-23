@@ -31,7 +31,8 @@ NS = "engineering"   # in live ETL, derived per source's owning CXO domain
 def upsert_entity(tx, label, key, short, long_, ep, ns=NS):
     # namespace is set ON CREATE only; a re-ingest under a DIFFERENT namespace is an ownership
     # violation and RAISES (FIX-NS at the entity layer — ownership never silently moves, matching
-    # mutate.resolve_entity). content_rev still bumps each ingest (the dirty/re-embed trigger).
+    # mutate.resolve_entity). content_rev + dirty bump ONLY when content actually changed (afh):
+    # an identical re-ingest is idempotent (rev stable) and never clears a concurrent re-embed flag.
     # :Episodic/:MENTIONS below is DEFERRED, write-only provenance scaffolding (evidence.py:9-11
     # "named for later, not v1"; decision rqb 2026-06-22 = keep deferred). Its ambient datetime() is
     # INTENTIONALLY left un-threaded to $now: nothing reads the Episodic clock, so a standalone fix
@@ -39,9 +40,16 @@ def upsert_entity(tx, label, key, short, long_, ep, ns=NS):
     # promoted — never as a piecemeal cleanup here.
     rec = tx.run(
         f"MERGE (n:Entity:{label} {{key:$key}}) "
-        "ON CREATE SET n.namespace=$ns "
+        "ON CREATE SET n.namespace=$ns, n.short_context=$short, n.long_context=$long, "
+        "              n.content_rev=1, n.dirty=false "
+        # afh: bump content_rev + set dirty ONLY when content actually changed. `changed` is a pre-SET
+        # snapshot (projected in WITH) so an identical re-ingest is a true no-op (idempotent content_rev)
+        # and never clears a concurrent mark_dirty (the dirty-flag race). ON CREATE pre-sets content so
+        # `changed` is false on create -> content_rev=1, dirty=false (original first-ingest behaviour).
+        "WITH n, (coalesce(n.short_context,'') <> $short OR coalesce(n.long_context,'') <> $long) AS changed "
         "SET n.short_context=$short, n.long_context=$long, "
-        "    n.content_rev=coalesce(n.content_rev,0)+1, n.dirty=false "
+        "    n.content_rev = n.content_rev + CASE WHEN changed THEN 1 ELSE 0 END, "
+        "    n.dirty = CASE WHEN changed THEN true ELSE n.dirty END "
         "WITH n MERGE (e:Episodic {uuid:$ep}) "
         "  ON CREATE SET e.created_at=datetime(), e.valid_at=datetime(), e.namespace=$ns "
         "MERGE (e)-[:MENTIONS]->(n) "
@@ -177,8 +185,10 @@ def main():
             s.execute_write(lambda tx: tx.run("MATCH (n) DETACH DELETE n"))  # clean slate
             dl1 = ingest(s, fetch_source("open"), "etl-run-1", NOW1)
             print("after run 1 (entities, edges, current):", s.execute_read(counts), "| dead-letter:", dl1)
+            rev1 = s.execute_read(lambda tx: tx.run("MATCH (n:Entity {key:'issue:ACME-1'}) RETURN n.content_rev AS r").single()["r"])
             dl2 = ingest(s, fetch_source("open"), "etl-run-1", NOW1)  # idempotency (same clock)
-            print("after re-run  (must be identical):     ", s.execute_read(counts), "| dead-letter:", dl2)
+            rev2 = s.execute_read(lambda tx: tx.run("MATCH (n:Entity {key:'issue:ACME-1'}) RETURN n.content_rev AS r").single()["r"])
+            print("after re-run  (must be identical):     ", s.execute_read(counts), "| dead-letter:", dl2, "| content_rev", rev1, "->", rev2)
             card, facts = s.execute_read(node_card, "issue:ACME-1", ["engineering", "shared"])
             print("CTO node-card ACME-1:", card, "| current facts:", facts)
             dl3 = ingest(s, fetch_source("closed"), "etl-run-2", NOW2)  # status open->closed (later clock)
@@ -187,6 +197,7 @@ def main():
             print("HAS_STATUS history (value, current):", s.execute_read(status_history, "issue:ACME-1"))
             print("LLM calls in path: 0 (pure Cypher via the single mutate.apply_edge engine)")
             assert not (dl1 or dl2 or dl3), ("unexpected dead-letter on the clean ACME fixture", dl1, dl2, dl3)
+            assert rev1 == rev2, ("afh: identical re-ingest must not bump content_rev (idempotency)", rev1, rev2)
             print("D1_SPINE_OK")
 
 

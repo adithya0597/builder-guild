@@ -16,7 +16,7 @@ DRILL INTERFACE CONTRACT (SERVE_JOIN_DESIGN §2.3):
     - "gated"     : the drill could not resolve (no grant, no live tree, etc.) — answer
                     may be an explanation, doc/sections may be absent or empty.
 
-A real adapter (private) makes one authenticated retrieval call via ladder.retrieve(deep=True) and maps
+A real adapter (private) makes one authenticated deep retrieval and maps
 the result to this shape. This stub makes ZERO external/LLM calls.
 
 INJECTION PATTERN (for tests and the demo):

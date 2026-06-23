@@ -5,7 +5,7 @@ position-swap on every pairwise comparison, no-self-family (asserted in judge_ad
 Deterministic metrics were settled deterministically in CAL-2/CAL-3 and are NOT re-judged here —
 25 trials of an exact-match would measure nothing.
 
-Sweep composition (REAL hermes gpt-5.4 calls, ~23 s/call mean n=3, 3 workers, checkpointed):
+Sweep composition (REAL judge-CLI gpt-5.4 calls, ~23 s/call mean n=3, 3 workers, checkpointed):
   pointwise  2 prose items x 25 trials                      =  50 calls (match-rate dispersion)
   pairwise   2 prose items x 25 trials x 2 orders           = 100 calls (position-bias measured)
   easy-agree 8 deterministic items x 3 trials               =  24 calls (judge sanity floor;
@@ -16,6 +16,11 @@ at 3 workers (LABELED-ESTIMATE from 23 s mean).
 Outputs cal4_results.json: per-item match medians/percentiles, position-bias delta, easy-case
 agreement, and the discretionary judge-vs-human kappa with its N (=2 -> reported UNMEASURABLE).
 DOES NOT flip CALIBRATED.
+
+SERVE-JOIN SCOPE (6gw): like cal3_fit, this sweep runs serve() GRAPH-ONLY (deep_serve OFF) — it
+does not judge the serve-join / deep_serve (PageIndex) path. The serve-join path is validated
+separately (serve.py INT3_OK + PAGEINDEX_ADAPTER_OK); a deep_serve judge sweep is deferred pending
+a real PageIndex corpus.
 """
 import argparse
 import json
