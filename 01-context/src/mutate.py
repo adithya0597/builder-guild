@@ -67,7 +67,9 @@ def apply_edge(tx, s_key, rel, o_key, now, ns, ep=None, op="add", lock=True):
                       close a directed cycle over current edges of this relation (DEPENDS_ON, SUPERSEDES).
 
     FIX-RACE (the Context-Engineering epic): any arity:1 path takes an exclusive subject-node write-lock first
-    (pure write, no read-upgrade deadlock) so concurrent writers serialize -> exactly one current.
+    (pure write, no read-upgrade deadlock) so concurrent writers THROUGH THIS ENGINE serialize -> exactly one
+    current. This is a CONVENTION, not a DB constraint: a writer that bypasses apply_edge can still create a
+    2nd current edge with no error — invariant_check.py is the whole-graph backstop sweep (gated in CI; run as a periodic ops sweep too).
     """
     try:
         rule = RULES[rel]

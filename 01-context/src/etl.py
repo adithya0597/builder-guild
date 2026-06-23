@@ -6,7 +6,7 @@ with the neo4j-graphrag/tracker client GET; everything downstream is unchanged.
 """
 from neo4j import GraphDatabase
 from datetime import datetime, timezone
-import mutate   # R3: the SINGLE write engine — all edge writes route through mutate.apply_edge
+import mutate   # R3: the single write ENGINE by convention (not DB-enforced); invariant_check.py is the >1-current backstop
 
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 

@@ -82,3 +82,7 @@ jobs:
           grep -q E1_MUT_OK /tmp/mutate.log
           python 01-context/src/deadedge_metrics.py | tee /tmp/deadedge.log
           grep -q DEADEDGE_METRICS_OK /tmp/deadedge.log
+          python 01-context/src/invariant_check.py | tee /tmp/invariant.log
+          grep -q SINGLE_CURRENT_OK /tmp/invariant.log
+          python 01-context/src/invariant_check.py --self-test | tee /tmp/invariant_st.log
+          grep -q INVARIANT_SELFTEST_OK /tmp/invariant_st.log
