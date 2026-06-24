@@ -14,8 +14,8 @@ def keyword_rung(s, allowed, text):
     """Keyword/exact-ID rung (memo §18.2 'keyword retrieval: exact phrases, IDs, issue
     references'). A query token that literally matches an in-scope node key (or its tail after
     the type prefix) is a deterministic hit — exact-ID reference is fact-authority, not fuzz.
-    Fixes the lexical-semantic trap (e.g. 'what does SPI-2 block' embeds near 'status=blocked'
-    cards instead of SPI-2 itself). Linear scan is fine at this graph size; swap to the FTS
+    Fixes the lexical-semantic trap (e.g. 'what does ACME-2 block' embeds near 'status=blocked'
+    cards instead of ACME-2 itself). Linear scan is fine at this graph size; swap to the FTS
     index when the node count grows."""
     rows = s.run("MATCH (n:Entity) WHERE n.namespace IN $allowed RETURN n.key AS k",
                  allowed=allowed).data()
@@ -110,7 +110,11 @@ def demo():
     import sys
     from scope import scope
     fail = []
-    q = "rate limit backoff for the inference client"          # best global match = issue:SPI-2 (engineering)
+    # DRIFT NOTE (etl fixture vs validated golden; bead 11b reconciles): demos retrieve against the
+    # LIVE etl seed, so they speak the etl vocabulary — etl ACME-2 = "Add vector index". The validated
+    # golden (03-evals/example_golden.jsonl) instead has ACME-2 = "rate-limit backoff". Do NOT treat
+    # the demo's ACME semantics as canonical; aligning the seed to the golden is founder-gated (11b).
+    q = "add a vector index for embedding similarity search"   # best global match = issue:ACME-2 (engineering "Add vector index")
 
     eng = retrieve({**scope("engineering"), "text": q})
     fin = retrieve({**scope("finance"), "text": q})
@@ -123,13 +127,14 @@ def demo():
     fail += [] if (eng["resolved_at"] == "vector" and eng_hits
                    and all(ns in ("engineering", "shared") for _, ns, _ in eng_hits)) \
         else ["engineering vector rung failed or leaked"]
-    # ISOLATION: the best global match (SPI-2, engineering) must NOT surface for a finance role;
+    # ISOLATION: the best global match (ACME-2, engineering) must NOT surface for a finance role;
     # every finance hit must be in finance/shared
     fin_keys = [k for k, _, _ in fin_hits]
-    fail += [] if ("issue:SPI-2" not in fin_keys
+    fail += [] if (fin_hits                                          # NON-VACUOUS: finance must return its OWN slice
+                   and "issue:ACME-2" not in fin_keys                # ...but never the engineering best-match (ACME-2)
                    and all(ns in ("finance", "shared") for _, ns, _ in fin_hits)) \
-        else ["finance vector rung leaked an out-of-slice node"]
-    print(f"[isolate] SPI-2 (engineering) in finance results? {'issue:SPI-2' in fin_keys} (must be False)")
+        else ["finance vector rung leaked an out-of-slice node OR returned nothing (vacuous isolation)"]
+    print(f"[isolate] ACME-2 (engineering) in finance results? {'issue:ACME-2' in fin_keys} (must be False)")
 
     if fail:
         print("INT2_FAIL:", fail); sys.exit(1)

@@ -53,8 +53,8 @@ def _support_coverage(query_text, primary, presentable_facts):
           confident-abstain early-stop BEFORE the multi-hop that finds the answer.
     Capped at 1.0; over-retrieval earns nothing (minimal-sufficient-subgraph principle).
 
-    CANONICALIZATION: the question names BARE ids ("SPI-3"); retrieved keys are PREFIXED
-    ("issue:SPI-3", "agent:cto"). Intersecting them raw never matches -> coverage collapses to 0.0
+    CANONICALIZATION: the question names BARE ids ("ACME-1"); retrieved keys are PREFIXED
+    ("issue:ACME-1", "agent:cto"). Intersecting them raw never matches -> coverage collapses to 0.0
     even when the asked entity IS in the support, RE-CREATING the very anti-correlation this signal
     removes. Normalize BOTH sides to the id token after the last ":" before intersecting.
 
@@ -222,8 +222,8 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         shown = list(fused_keys[:k])
         for kk in shown:
             _add_card(kk)
-        # 1-HOP EXPANSION (R2b): multi-hop answers need the TARGET card too (e.g. "SPI-2 blocks
-        # SPI-3, who owns SPI-3?" — SPI-3's card carries the second hop). One hop only, in-scope
+        # 1-HOP EXPANSION (R2b): multi-hop answers need the TARGET card too (e.g. "ACME-2 blocks
+        # ACME-1, who owns ACME-1?" — ACME-1's card carries the second hop). One hop only, in-scope
         # only (CARD_Q re-checks namespace), capped at k extra cards.
         for tgt in expand:
             if len(shown) >= 2 * k:
@@ -413,7 +413,7 @@ def _demo():
     import sys, json
     import pageindex_adapter, evidence, epist
 
-    r = serve("rate limit backoff for the inference client", "engineering")
+    r = serve("add a vector index for embedding similarity search", "engineering")
     print(json.dumps(r["trace"], indent=2, default=str))
     print(f"\n[serve] primary={r['primary']} decision={r['decision']} mode={r['mode']} "
           f"executed={r['executed']}")
@@ -453,9 +453,12 @@ def _demo():
     # The tripwire stays armed (must not fire), and serve_join trace must show deep_warranted=False
     # with the "coverage sufficient" reason and NO drill_candidate field.
     # Use a query that names in-scope entity IDs so _support_coverage() meets tau.
-    # "issue:SPI-2 blocks issue:SPI-3" -> primary=issue:SPI-3; issue:SPI-3's facts cover SPI-2,
-    # giving coverage_initial=0.5 == tau -> coverage gate fires (>= tau is True), zero PageIndex reads.
-    q_hi = "issue:SPI-2 blocks issue:SPI-3"
+    # "issue:ACME-2 blocks issue:ACME-1" -> keyword_rung matches BOTH ids; sorted -> primary=issue:ACME-1.
+    # ACME-1 carries presentable facts so it counts toward support -> 1 of the 2 asked ids covered ->
+    # coverage_initial=0.5 == tau -> coverage gate fires. The assertion checks deep_warranted is False
+    # (coverage >= tau), NOT == 0.5 exactly, so it holds whether RRF resolves primary to ACME-1 (->0.5)
+    # or ACME-2 (whose BLOCKS->ACME-1 fact gives ->1.0); either way >= tau -> zero PageIndex reads.
+    q_hi = "issue:ACME-2 blocks issue:ACME-1"
     pageindex_adapter._inject(_tripwire)
     try:
         rh = serve(q_hi, "engineering")
@@ -498,7 +501,7 @@ def _demo():
         else ["(i-transform) from_pageindex did not produce the expected prose EvidenceItem"]
     # (b) epist.weights_for puts fact-authority before prose:
     _w = epist.weights_for("engineering")
-    gi = evidence.from_graph("ASSIGNED_TO -> agent:cto", namespace="engineering", node_id="issue:SPI-2")
+    gi = evidence.from_graph("ASSIGNED_TO -> agent:cto", namespace="engineering", node_id="issue:ACME-2")
     mixed = sorted([pit, gi], key=lambda it: -_w.get(it.retrieval_method, 0.0))
     mixed_auth = [it.authority_hint for it in mixed]
     fail += [] if (mixed_auth == ["fact", "prose"]
@@ -559,5 +562,5 @@ if __name__ == "__main__":
         _demo()
     else:
         import json
-        key = sys.argv[1] if len(sys.argv) > 1 else "issue:SPI-1"
+        key = sys.argv[1] if len(sys.argv) > 1 else "issue:ACME-1"
         print(json.dumps(node_card(key, ["engineering", "shared"]), indent=2, default=str))

@@ -53,7 +53,9 @@ point-in-time, permissioned questions a fleet actually asks. Builder Guild makes
 cd 01-context && docker compose up -d        # Neo4j (community)
 bash setup_a2.sh                             # venv + driver + smoke test
 export PYTHONPATH="$PWD/src:$PWD/../03-evals/src:$PWD/../02-agents/src"
+pip install -r ../requirements.txt -r ../requirements-dev.txt   # adds sentence-transformers (EmbeddingGemma) for the vector path
 python src/etl.py                            # synthetic demo graph (deterministic writes)
+python src/demo_seed.py                      # embed the seed + add the vector-path demo nodes (needs sentence-transformers)
 python src/serve.py demo                     # end-to-end: retrieve→fuse→stamp→gate, traced
 python ../02-agents/src/demo_agent.py        # an agent consuming governed context
 python ../03-evals/src/golden.py             # golden-set schema + validation demo

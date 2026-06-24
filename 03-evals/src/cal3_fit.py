@@ -67,7 +67,7 @@ def support_nodes(item):
 
 
 def _is_exact_gold(gold):
-    """True when a gold answer is exact-matchable (an entity key like 'agent:cto'/'issue:SPI-3'
+    """True when a gold answer is exact-matchable (an entity key like 'agent:cto'/'issue:ACME-3'
     or a status enum like 'todo'), vs free-form prose that needs the judge. Generalizes the old
     hardcoded ('agent:cto','agent:cfo','in_progress') list — which fit only the ACME public
     example — to the full spine namespace. §0: deterministic facts are settled deterministically,
