@@ -20,3 +20,5 @@ CREATE CONSTRAINT externalsource_key IF NOT EXISTS FOR (n:ExternalSource) REQUIR
 CREATE CONSTRAINT vote_key IF NOT EXISTS FOR (n:Vote) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT decisionrecord_key IF NOT EXISTS FOR (n:DecisionRecord) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT forceentry_key IF NOT EXISTS FOR (n:ForceEntryCondition) REQUIRE n.key IS UNIQUE;
+// Chunk passages (cf7 — fine-grained retrieval target; key = '<parent_key>#<ord>')
+CREATE CONSTRAINT chunk_key IF NOT EXISTS FOR (c:Chunk) REQUIRE c.key IS UNIQUE;

@@ -12,3 +12,10 @@ CREATE FULLTEXT INDEX node_text IF NOT EXISTS FOR (n:Entity) ON EACH [n.short_co
 // vector on intrinsic-content embedding (EmbeddingGemma-300M = 768 dims, cosine; PART 1 §5)
 CREATE VECTOR INDEX node_embedding IF NOT EXISTS FOR (n:Entity) ON (n.embedding)
   OPTIONS {indexConfig: {`vector.dimensions`: 768, `vector.similarity_function`: 'cosine'}};
+// chunk-level vector (cf7 — rung 2b "which passage"; PART 1 §5b, PART 2 ladder 2b). Neo4j HNSW indexes
+// ONE vector property per node, so multi-chunk recall lives on :Chunk nodes (one indexed vector each),
+// NOT a vector-list on :Entity. Same 768/cosine config as node_embedding (same EmbeddingGemma model).
+CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON (c.embedding)
+  OPTIONS {indexConfig: {`vector.dimensions`: 768, `vector.similarity_function`: 'cosine'}};
+// namespace (isolation filter) on :Chunk — chunk recall is namespace-post-filtered like node recall
+CREATE RANGE INDEX chunk_namespace IF NOT EXISTS FOR (c:Chunk) ON (c.namespace);
