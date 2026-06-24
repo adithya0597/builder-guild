@@ -21,14 +21,25 @@ gate is untouched: the isolation / deep-rung tests need node PRESENCE + an embed
   - extsrc:context-evals       (shared)   -> serve INT3 deep-rung signal: a long-doc node carrying
                                              pageindex_ref + a NON-EMPTY pageindex_doc_sha, which is
                                              what serve()'s deep_warranted requires.
+  - extsrc:db-runbook          (engineering) -> cf7/bzr CHUNK_RECALL: a genuine MULTI-sentence doc
+                                             (chunk_prose splits it into >1 chunk) whose distinctive
+                                             passage ("a reaper reclaims idle connections") is NOT the
+                                             doc's dominant theme — so chunk-vector recall (rung 2b)
+                                             finds that passage better than the doc-averaged node vector.
+  - extsrc:finance-policy      (finance)   -> cf7/bzr CHUNK_RECALL isolation: a SECOND multi-chunk node
+                                             in a different namespace, so the finance role returns its
+                                             OWN chunk slice (non-vacuous) while the engineering runbook
+                                             chunk stays filtered out.
 
 embed_all() is the general embed-the-seed pass: every :Entity with long_context gets a 768-d
-EmbeddingGemma vector via embed.embed_node (kind=prose). $0 / local — the model runs on-box, no API.
+EmbeddingGemma vector via embed.embed_node (kind=prose). When a node splits into >1 chunk, embed_node
+also materializes one indexed :Chunk per chunk (cf7); single-chunk nodes get none. $0 / local — the
+model runs on-box, no API.
 """
 import sys
 from neo4j import GraphDatabase
 from mutate import resolve_entity
-from embed import embed_node
+from embed import embed_node, assert_chunk_namespace_isolation
 
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl's NOW1/NOW2
@@ -38,7 +49,8 @@ NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl
 CTX_EVALS_SHA = "demo-sha-context-evals-0001"
 
 # the demo-critical nodes the embedding-path demos structurally depend on (presence + embedding)
-DEMO_CRITICAL = ["issue:ACME-2", "issue:ACME-4", "issue:ACME-9", "extsrc:context-evals"]
+DEMO_CRITICAL = ["issue:ACME-2", "issue:ACME-4", "issue:ACME-9", "extsrc:context-evals",
+                 "extsrc:db-runbook", "extsrc:finance-policy"]
 
 
 def seed_extras(session, now=NOW):
@@ -70,6 +82,29 @@ def seed_extras(session, now=NOW):
     session.execute_write(lambda tx: tx.run(
         "MATCH (n:Entity {key:'extsrc:context-evals'}) SET n.pageindex_ref=$ref, n.pageindex_doc_sha=$sha",
         ref="/docs/context-evals.md", sha=CTX_EVALS_SHA))
+    # cf7/bzr CHUNK_RECALL — a genuine MULTI-sentence engineering runbook. chunk_prose splits this into
+    # >1 chunk, so embed_node materializes one indexed :Chunk per chunk. The distinctive "reaper reclaims
+    # idle connections" passage is buried mid-doc (the doc spans health/pooling/backups/timeouts), so a
+    # passage-specific query matches that CHUNK far better than the doc-averaged node vector — the case
+    # rung 2b exists for. Sentences are ". "-separated so chunk_prose actually splits them.
+    session.execute_write(lambda tx: resolve_entity(
+        tx, "ExternalSource", "extsrc:db-runbook", now, "engineering",
+        short="Service DB runbook",
+        long_="The service exposes a health endpoint at /healthz that returns 200 once the connection "
+              "pool is warm. The bolt driver pool is fixed-size and allocated at process startup. Under "
+              "sustained write load the pool can exhaust, so a reaper thread reclaims idle connections "
+              "every thirty seconds. Nightly backups snapshot the store to object storage with a "
+              "fourteen-day retention. Query timeouts default to thirty seconds and are configurable "
+              "per session."))
+    # second multi-chunk node in a DIFFERENT namespace — makes the chunk-recall isolation test
+    # non-vacuous: the finance role returns its OWN chunk slice while the engineering runbook stays out.
+    session.execute_write(lambda tx: resolve_entity(
+        tx, "ExternalSource", "extsrc:finance-policy", now, "finance",
+        short="Finance spend policy",
+        long_="The quarterly budget is approved by the CFO before the fiscal period opens. Cloud "
+              "inference spend is capped per team and tracked against the GPU allocation. Expense "
+              "reports must be filed within thirty days of purchase. Vendor invoices over ten thousand "
+              "dollars require dual approval. Unused budget does not roll over to the next quarter."))
 
 
 def embed_all(session, now=NOW):
@@ -95,12 +130,29 @@ def main():
                 need=DEMO_CRITICAL)}
             sha_ok = s.run("MATCH (n:Entity {key:'extsrc:context-evals'}) "
                            "RETURN n.pageindex_doc_sha AS s").single()["s"]
+            # post-impl HIGH-1: run the STRUCTURAL chunk isolation proof on the REAL seeded graph (not
+            # only embed.py's transient demo fixture) — raises on any cross-namespace :Chunk leak/orphan.
+            assert_chunk_namespace_isolation(s)
+            n_chunks = s.run("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS c").single()["c"]
+            # post-impl MED-2: chunk-count consistency on the real graph. By-design ASYMMETRY: a multi-chunk
+            # parent has actual :Chunk count == chunk_count; a single-chunk node has chunk_count==1 AND zero
+            # :Chunk nodes (it returns directly, no materialization). A naive actual==chunk_count would
+            # false-positive on every single-chunk node, so encode the asymmetry explicitly.
+            drift = s.run(
+                "MATCH (e:Entity) WHERE e.chunk_count IS NOT NULL "
+                "OPTIONAL MATCH (e)-[:HAS_CHUNK]->(c:Chunk) "
+                "WITH e, count(c) AS actual "
+                "WHERE (e.chunk_count > 1 AND actual <> e.chunk_count) "
+                "   OR (e.chunk_count = 1 AND actual <> 0) "
+                "RETURN e.key AS k, e.chunk_count AS cc, actual LIMIT 5").data()
     print(f"[demo_seed] embedded {n} content nodes (graph now has {emb} embedded entities)")
     print(f"[demo_seed] demo-critical nodes embedded: {sorted(present)} | extsrc doc_sha={sha_ok!r}")
+    print(f"[demo_seed] chunk nodes materialized: {n_chunks} | isolation: clean | chunk-count drift: {drift or 'none'}")
     fail = []
     fail += [] if emb > 0 else ["no embeddings written"]
     fail += [] if set(DEMO_CRITICAL) <= present else [f"missing demo-critical embedded nodes: {set(DEMO_CRITICAL) - present}"]
     fail += [] if sha_ok else ["extsrc:context-evals has no doc_sha (serve deep_warranted would be False)"]
+    fail += [] if not drift else [f"chunk-count drift (chunk_count vs materialized :Chunk): {drift}"]
     if fail:
         print("DEMO_SEED_FAIL:", fail); sys.exit(1)
     print("DEMO_SEED_OK")

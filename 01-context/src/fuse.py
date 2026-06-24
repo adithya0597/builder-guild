@@ -13,11 +13,13 @@ import sys
 K = 60
 
 # RRF tie-break authority: an exact-ID keyword hit outranks an equally-scored fuzzy vector hit
-# (serve's epist order: keyword/graph = fact-authority > vector = recall). Explicit map BY NAME —
-# not dict iteration order — so the contract can't break if a caller builds `rankings` differently.
-# Unknown sources default to lowest authority. (RC2 fix: was an alphabetical doc_id tie-break that
-# silently discarded exact-ID authority whenever the fuzzy hit's key happened to sort earlier.)
-SOURCE_PRIORITY = {"keyword": 0, "graph": 1, "vector": 2}
+# (serve's epist order: keyword/graph = fact-authority > vector recall > chunk-vector recall). Explicit
+# map BY NAME — not dict iteration order — so the contract can't break if a caller builds `rankings`
+# differently. Unknown sources default to lowest authority. (RC2 fix: was an alphabetical doc_id
+# tie-break that silently discarded exact-ID authority whenever the fuzzy hit's key happened to sort
+# earlier.) cf7: "chunk" (rung 2b, the finest/fuzziest recall) sits just below node-vector — on a SCORE
+# tie a coarse-node hit wins; a chunk hit earns its place by RANKING high, not by tie-break authority.
+SOURCE_PRIORITY = {"keyword": 0, "graph": 1, "vector": 2, "chunk": 3}
 
 
 def rrf(rankings, k=K):

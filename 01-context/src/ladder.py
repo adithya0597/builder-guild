@@ -77,6 +77,51 @@ def vector_rung(s, allowed, text, k=3):
     return _vector_query(s, allowed, qv, k)
 
 
+def chunk_vector_available(s):
+    return s.run("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS c").single()["c"] > 0
+
+
+def _chunk_vector_query(s, allowed, qv, k):
+    """Escalating post-filtered ANN over chunk_embedding (cf7 rung 2b; SAME 10o cliff fix as
+    _vector_query). queryNodes returns :Chunk nodes BLIND to namespace; post-filter to the role's
+    chunks, resolve each to its parent :Entity, and DEDUPE to the best-scoring chunk per parent (one
+    parent = one fused hit, carrying its best-matching passage in `chunk`). Escalate the over-fetch
+    until >=k DISTINCT in-scope parents OR the whole chunk set is scanned (worst case = exact scan, no
+    cliff). Rows arrive score-desc, so the first chunk seen per parent is that parent's best passage."""
+    total = s.run("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS c").single()["c"]
+    Q = ("CALL db.index.vector.queryNodes('chunk_embedding', $over, $q) YIELD node, score "
+         "WHERE node.namespace IN $allowed "
+         "RETURN node.parent_key AS key, node.namespace AS ns, node.key AS chunk_key, "
+         "       node.text AS chunk, score ORDER BY score DESC")
+    over = k * 5
+    while True:
+        rows = s.run(Q, q=qv, allowed=allowed, over=min(over, max(total, 1))).data()
+        best = {}                                 # parent -> best (first-seen = highest score)
+        for r in rows:
+            best.setdefault(r["key"], r)
+        if len(best) >= k or over >= total:
+            return list(best.values())[:k]
+        over *= 5
+
+
+def chunk_rung(s, allowed, text, k=3):
+    """Rung 2b (cf7): chunk-level vector recall — "which passage". Embed the query (local
+    EmbeddingGemma), queryNodes the chunk_embedding HNSW index, NAMESPACE-FILTER, resolve each :Chunk
+    to its parent :Entity, dedupe to the best passage per parent, cap at k distinct parents. The
+    over-fetch ESCALATES to defeat the recall cliff (10o). SAME optional-dep resilience as vector_rung:
+    a missing sentence_transformers degrades to [] (graph/keyword still serve); any other failure
+    propagates. Returns [{key(=parent), ns, chunk_key, chunk(text), score}] — `key` feeds RRF fusion,
+    `chunk` is the selected passage serve surfaces (bzr)."""
+    try:
+        from embed import embed
+        qv = embed(text)
+    except ModuleNotFoundError as e:
+        if e.name == "sentence_transformers":     # optional embedder absent -> graceful degrade
+            return []
+        raise                                     # real failure -> surface it
+    return _chunk_vector_query(s, allowed, qv, k)
+
+
 def retrieve(query):
     allowed = query["allowed"]
     k = query.get("t_cap", 3)
@@ -96,6 +141,11 @@ def retrieve(query):
             trace.append({"rung": 2, "name": "vector",
                           "status": "ready" if vector_available(s) else "GATED: no embeddings",
                           "note": "no query text" if not query.get("text") else "no in-scope hits"})
+        # NOTE: chunk-vector (rung 2b, chunk_rung) is NOT wired into this first-hit-escalation ladder.
+        # retrieve() returns at the first rung that hits, and node-vector (rung 2) hits for almost any
+        # query (cosine always ranks something in-scope), so a 2b branch here would be near-unreachable.
+        # Chunk-vector recall lives in serve()'s PARALLEL-FUSION path (serve.py: chunk_rung joins RRF +
+        # surfaces the selected passage), which is the read path that benefits from "which passage" recall.
         longdocs = [r["k"] for r in s.run(                          # Rung 3: PageIndex (graph-scoped)
             "MATCH (n:Entity) WHERE n.pageindex_ref IS NOT NULL AND n.namespace IN $allowed RETURN n.key AS k",
             allowed=allowed)]

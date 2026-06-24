@@ -141,15 +141,32 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         graph_hits = ladder.graph_rung(s, allowed, pattern) if pattern else []
         vec_hits = ladder.vector_rung(s, allowed, query_text, k) if query_text else []
         vec_keys = [h["key"] for h in vec_hits]
-        trace["retrieve"] = {"keyword": kw_hits, "graph": graph_hits, "vector": vec_keys}
+        # cf7 rung 2b — chunk-level vector recall ("which passage"). Returns parent keys (for fusion) +
+        # the SELECTED passage per parent (for bzr surfacing). Gated on chunk vectors existing, so a
+        # graph with only single-chunk nodes (no :Chunk materialized) behaves exactly as before.
+        chunk_hits = (ladder.chunk_rung(s, allowed, query_text, k)
+                      if query_text and ladder.chunk_vector_available(s) else [])
+        chunk_keys = [h["key"] for h in chunk_hits]
+        chunk_passages = {h["key"]: h["chunk"] for h in chunk_hits}    # bzr: parent key -> selected passage
+        # CORRELATED-SOURCE DEDUP (post-impl red-team B1): node-vector (2a) and chunk-vector (2b) are
+        # NOT independent retrievers — same EmbeddingGemma model over two granularities of the SAME
+        # content — so a parent found by BOTH is one correlated signal, not consensus. RRF sums a
+        # contribution PER source, which would double-score that parent (2/(k+1)) and let a purely-recall
+        # node leap the fact-authority tier (keyword/graph), violating the epist contract. So chunk only
+        # EXTENDS recall in fusion: it votes for parents node-vector MISSED. (trace + chunk_passages keep
+        # the FULL chunk hits — the rung still reports/surfaces db-runbook even when vector also found it.)
+        chunk_fusion = [c for c in chunk_keys if c not in vec_keys]
+        trace["retrieve"] = {"keyword": kw_hits, "graph": graph_hits, "vector": vec_keys,
+                             "chunk": chunk_keys, "chunk_fused": chunk_fusion}
 
         # 2. FUSE — RRF across whichever sources fired. fuse.rrf breaks RRF score-ties by SOURCE
-        # AUTHORITY (keyword > graph > vector), so an exact-ID reference beats an equally-ranked
+        # AUTHORITY (keyword > graph > vector > chunk), so an exact-ID reference beats an equally-ranked
         # fuzzy hit (RC2 fix — previously a doc_id alphabetical tie-break dropped that authority;
         # full weighted RRF is the R7 upgrade).
         rankings = {**({"keyword": kw_hits} if kw_hits else {}),
                     **({"graph": graph_hits} if graph_hits else {}),
-                    **({"vector": vec_keys} if vec_keys else {})}
+                    **({"vector": vec_keys} if vec_keys else {}),
+                    **({"chunk": chunk_fusion} if chunk_fusion else {})}
         if not rankings:                                  # no retrieval (incl. vector degraded/absent)
             # UNIFORM RETURN CONTRACT: same keys as the normal return below, so a caller never
             # KeyErrors on the abstain path (surfaced when vector_rung degrades to [] without the
@@ -186,9 +203,10 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         trace["fuse"] = {"fused_top": fused[:k]}
 
         # 3. EPIST — source authority (keyword/graph = fact-authority > vector = recall)
-        sources = {kk: ("keyword" if kk in kw_hits else "graph" if kk in graph_hits else "vector")
+        sources = {kk: ("keyword" if kk in kw_hits else "graph" if kk in graph_hits
+                        else "vector" if kk in vec_keys else "chunk")
                    for kk in fused_keys}
-        trace["epist"] = {"primary_source": sources[primary], "authority": "keyword=graph>vector"}
+        trace["epist"] = {"primary_source": sources[primary], "authority": "keyword=graph>vector>chunk"}
 
         # 4. STAMP + 5. RECONCILE — the primary node's card (o.namespace-isolated)
         rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed).single()
@@ -214,6 +232,13 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                         "RETURN n.long_context AS ctx", k=kk, allowed=allowed).single()
             if ctx and ctx["ctx"]:
                 composed.append(f"content({kk}): {ctx['ctx'][:200]}")
+            # bzr: a node retrieved via chunk-vector (rung 2b) surfaces its SELECTED passage — the chunk
+            # the query actually matched — not just the long_context abstract (whose [:200] truncation may
+            # cut before the relevant span). Only the ONE selected chunk is surfaced (chunk_passages is
+            # already deduped to the best passage per parent), so this never bloats the answer with all
+            # chunks (the bzr concern). This is the read that makes embed.py's n.chunks no longer dead.
+            if kk in chunk_passages:
+                composed.append(f"content_chunk({kk}): {chunk_passages[kk][:200]}")
             for f in stamp.freshness_judge(stamp.stamp_card(crec)):
                 composed.append(f"{kk}: {f['fact']}")
                 m = re.search(r"->\s*(\S+)", f["fact"])
@@ -375,11 +400,16 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         if not claims:
             claims = [{"id": primary, "support_status": "UNSUPPORTED", "stale": False, "conflict": False}]
         # confidence basis is EXPLICIT (codex: no fabricated 0.9). A vector hit uses its cosine
-        # score; a graph-only hit is an exact structural MATCH = high-certainty by construction
-        # (fact-authority), labelled as such — not a pretend score.
+        # score; a chunk-vector hit uses its chunk cosine; a graph-only hit is an exact structural MATCH
+        # = high-certainty by construction (fact-authority), labelled as such — not a pretend score.
+        # post-impl red-team B2: a chunk-ONLY primary (in chunk_hits, not vec_hits) must NOT be mislabeled
+        # "graph_structural_exact" 0.95 — it is fuzzy recall. Use its real chunk cosine + an honest basis.
         vec_score = next((h["score"] for h in vec_hits if h["key"] == primary), None)
+        chunk_score = next((h["score"] for h in chunk_hits if h["key"] == primary), None)
         if vec_score is not None:
             self_conf, conf_basis = round(min(0.99, vec_score), 2), "vector_score"
+        elif chunk_score is not None:
+            self_conf, conf_basis = round(min(0.99, chunk_score), 2), "chunk_vector_score"
         else:
             self_conf, conf_basis = 0.95, "graph_structural_exact"
 
@@ -556,10 +586,49 @@ def _demo():
     print("INT3_OK")
 
 
+def _chunk_demo():
+    """INT-2b (cf7 + bzr): chunk-vector recall + selected-passage surfacing on the LIVE seeded graph.
+    Assumes the pipeline ran (etl.py -> demo_seed.py), so the multi-chunk nodes extsrc:db-runbook
+    (engineering) and extsrc:finance-policy (finance) exist WITH indexed :Chunk children. Proves:
+      cf7  — a PASSAGE-specific query retrieves the right multi-chunk node via the chunk rung (2b),
+             and that node joins RRF fusion (trace.retrieve.chunk).
+      bzr  — serve surfaces the SELECTED chunk (content_chunk(...)) — the passage the query actually
+             matched, not just the long_context abstract. THIS is the read that makes embed.py's
+             n.chunks no longer dead-stored.
+      iso  — the engineering runbook chunk NEVER surfaces for a finance role, while finance still
+             returns its OWN chunk slice (non-vacuous isolation; mirrors ladder INT2)."""
+    import sys
+    q = "how does the service reclaim idle database connections with a reaper"
+    eng = serve(q, "engineering")
+    fin = serve(q, "finance")
+    eng_chunk = eng["trace"]["retrieve"]["chunk"]
+    fin_chunk = fin["trace"]["retrieve"]["chunk"]
+    surfaced = [c for c in eng["composed_evidence"] if c.startswith("content_chunk(extsrc:db-runbook)")]
+    print(f"[chunk]   engineering chunk-rung hits = {eng_chunk}")
+    print(f"[chunk]   finance     chunk-rung hits = {fin_chunk}")
+    print(f"[bzr]     surfaced selected passage   = {surfaced[:1]}")
+    print(f"[isolate] db-runbook (engineering) in finance chunk hits? "
+          f"{'extsrc:db-runbook' in fin_chunk} (must be False)")
+
+    fail = []
+    fail += [] if "extsrc:db-runbook" in eng_chunk else ["cf7: chunk rung did not retrieve extsrc:db-runbook"]
+    fail += [] if surfaced and "reaper" in surfaced[0].lower() \
+        else ["bzr: serve did not surface the selected reaper chunk on the answer surface"]
+    fail += [] if "extsrc:db-runbook" not in fin_chunk \
+        else ["isolation: finance role leaked the engineering runbook chunk"]
+    fail += [] if fin_chunk else ["isolation vacuous: finance returned no chunk hits (finance :Chunk nodes seeded?)"]
+
+    if fail:
+        print("CHUNK_RECALL_FAIL:", fail); sys.exit(1)
+    print("CHUNK_RECALL_OK")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "demo":
         _demo()
+    elif len(sys.argv) > 1 and sys.argv[1] == "chunk":
+        _chunk_demo()
     else:
         import json
         key = sys.argv[1] if len(sys.argv) > 1 else "issue:ACME-1"
