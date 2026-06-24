@@ -394,7 +394,7 @@ def demo():
 
         # --- T3: role-scoped read ---
         print("[T3] Role-scoped read...")
-        eng_node = "issue:SPI-1"  # known engineering node from seeded ACME graph
+        eng_node = "issue:ACME-1"  # known engineering node from seeded ACME graph
         r_allowed = community_summary(s, eng_node, ["engineering", "shared"])
         r_denied = community_summary(s, eng_node, ["finance", "shared"])
 
@@ -546,7 +546,7 @@ def demo():
         s.run("MATCH (c:Community {key:'community:engineering:GHOST'}) DETACH DELETE c")
 
         # (b) membership edge stamped with the WRONG namespace (member node ns matches, edge ns doesn't)
-        s.run("MATCH (e:Entity {key:'issue:SPI-1'}) "
+        s.run("MATCH (e:Entity {key:'issue:ACME-1'}) "
               "CREATE (e)-[:IN_COMMUNITY {namespace:'finance'}]->"
               "(:Community {key:'community:engineering:BADEDGE', namespace:'engineering'})")
         if not _caught("community:engineering:BADEDGE"):
@@ -554,7 +554,7 @@ def demo():
         s.run("MATCH (c:Community {key:'community:engineering:BADEDGE'}) DETACH DELETE c")
 
         # (c) community with NULL namespace
-        s.run("MATCH (e:Entity {key:'issue:SPI-1'}) "
+        s.run("MATCH (e:Entity {key:'issue:ACME-1'}) "
               "CREATE (e)-[:IN_COMMUNITY {namespace:'engineering'}]->(:Community {key:'community:NULLNS'})")
         if not _caught("community:NULLNS"):
             fail("T10c", "null-namespace community NOT caught"); t10_ok = False
@@ -562,7 +562,7 @@ def demo():
 
         # (d) membership edge with NO namespace property at all — collect(DISTINCT) drops null,
         # so the proof must catch it via the count(m) vs count(m.namespace) check (codex iter2 HIGH).
-        s.run("MATCH (e:Entity {key:'issue:SPI-1'}) "
+        s.run("MATCH (e:Entity {key:'issue:ACME-1'}) "
               "CREATE (e)-[:IN_COMMUNITY]->(:Community {key:'community:engineering:NULLEDGE', namespace:'engineering'})")
         if not _caught("community:engineering:NULLEDGE"):
             fail("T10d", "null-namespace membership edge NOT caught"); t10_ok = False
