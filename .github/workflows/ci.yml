@@ -2,7 +2,9 @@ name: ci
 
 # Minimum-useful CI (not vanity): catch the manifest/runnability regression class on a
 # clean clone, and gate the ingest/write engine + dead-edge instrument against a real Neo4j.
-# NOTE: the serve()/retrieval ANSWER path is NOT gated here yet (tracked separately).
+# NOTE (uti): read-path pure+graph gates ARE now run in the graph job (scope/epist/abstain/gate/
+# stamp/reconcile + recall & retention self-tests). The embedding-backed retrieval demos
+# (embed/ladder-INT2/fuse/sweep/serve-INT3) need a vector seed and are the next increment.
 on:
   push:
     branches: [main]
@@ -55,8 +57,9 @@ jobs:
   graph:
     # Real Neo4j. Gates the ingest/write engine + invariant backstops: seed schema -> spine ingest
     # + node-card read-back -> mutate/namespace-isolation -> dead-edge metric -> single-current +
-    # cycle detection sweeps (each with a self-test) -> sentinel migration guard. The serve()/
-    # retrieval ANSWER path is NOT exercised here yet.
+    # cycle detection sweeps (each with a self-test) -> sentinel migration guard -> read-path gates
+    # (scope/epist/abstain/gate/stamp/reconcile + recall & retention self-tests, uti). The
+    # embedding-backed retrieval demos (ladder-INT2/serve-INT3/fuse/sweep) are the next increment.
     runs-on: ubuntu-latest
     services:
       neo4j:
@@ -99,3 +102,21 @@ jobs:
           grep -q GUARD_OK /tmp/guard.log
           python tools/run_guard.py --self-test | tee /tmp/guard_st.log
           grep -q GUARD_SELFTEST_OK /tmp/guard_st.log
+      - name: read-path gates (uti — scope/epist/abstain/gate/stamp/reconcile + recall & retention self-tests)
+        run: |
+          python 01-context/src/scope.py | tee /tmp/scope.log
+          grep -q F3_SCOPE_OK /tmp/scope.log
+          python 01-context/src/epist.py | tee /tmp/epist.log
+          grep -q EPIST_OK /tmp/epist.log
+          python 01-context/src/abstain.py | tee /tmp/abstain.log
+          grep -q FIX_ABSTAIN_OK /tmp/abstain.log
+          python 01-context/src/gate.py | tee /tmp/gate.log
+          grep -q GATE_OK /tmp/gate.log
+          python 01-context/src/stamp.py | tee /tmp/stamp.log
+          grep -q F4_STAMP_OK /tmp/stamp.log
+          python 01-context/src/reconcile.py | tee /tmp/reconcile.log
+          grep -q FIX_RECON_OK /tmp/reconcile.log
+          python 01-context/src/ladder.py --recall-selftest | tee /tmp/recall.log
+          grep -q RECALL_SELFTEST_OK /tmp/recall.log
+          python 01-context/src/retention_sweep.py --selftest | tee /tmp/retention.log
+          grep -q RETENTION_SELFTEST_OK /tmp/retention.log

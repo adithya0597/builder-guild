@@ -104,7 +104,7 @@ def _host_freshness(s, key, allowed):
     return ("stale" if rec["dirty"] else "fresh"), rec["ns"]
 
 
-def serve(query_text, role, pattern=None, action=None, deep_serve=False):
+def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=False):
     """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
     serve-join (deep PageIndex escalation, OPT-IN) -> gate+abstain -> execute.
@@ -122,8 +122,8 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False):
       - runs the graph + vector rungs IN PARALLEL for fusion — it does NOT use ladder.retrieve()'s
         first-hit eval-gated ESCALATION (fusion needs both sources; escalation short-circuits). These
         are two different retrieval modes; serve() deliberately uses the fusion mode.
-      - fuse.cross_encoder_rerank is available but NOT invoked here — serve() does RRF only.
-        With a single non-empty source, RRF degrades to identity ranking (not true fusion).
+      - fuse.cross_encoder_rerank is OPT-IN via rerank=True (9jq); default rerank=False keeps the
+        $0 RRF-only path. With a single non-empty source, RRF degrades to identity ranking.
       - sufficiency/confidence are PROXIES (not validated evidence quality) — calibrated in H2b.
     SECURITY: `role` is TRUSTED here. It must be AUTHENTICATED upstream — a self-asserted
     role='governance' would read all namespaces. Do not expose `role` to an unauthenticated caller.
@@ -150,9 +150,37 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False):
         rankings = {**({"keyword": kw_hits} if kw_hits else {}),
                     **({"graph": graph_hits} if graph_hits else {}),
                     **({"vector": vec_keys} if vec_keys else {})}
-        if not rankings:
-            return {"decision": "abstain", "mode": sc and "suggest", "reason": "no in-scope retrieval", "trace": trace}
+        if not rankings:                                  # no retrieval (incl. vector degraded/absent)
+            # UNIFORM RETURN CONTRACT: same keys as the normal return below, so a caller never
+            # KeyErrors on the abstain path (surfaced when vector_rung degrades to [] without the
+            # optional embedder and keyword/graph also miss). primary=None signals nothing retrieved.
+            return {"query": query_text, "role": role, "primary": None, "presentable_facts": [],
+                    "composed_evidence": [], "decision": "abstain", "mode": "suggest",
+                    "reason": "no in-scope retrieval", "executed": False, "provenance": {}, "trace": trace}
         fused = fuse.rrf(rankings)
+        # 2b. RERANK (9jq) — OPT-IN cross-encoder rerank of the fused set. Default OFF: serve stays
+        # $0/RRF-only (the shipping path). When rerank=True AND sentence-transformers is installed,
+        # re-score the fused docs by true (query, long_context) relevance; on ImportError fall back to
+        # the RRF order (optional dev dep, never a hard requirement). Reorders what is PRESENTED; the
+        # gate's claims are still built downstream from the (possibly reranked) order.
+        if rerank and fused:
+            try:
+                from sentence_transformers import CrossEncoder
+                _keys = [kk for kk, _ in fused]
+                _rows = {r["k"]: r["ctx"] for r in s.run(
+                    "MATCH (n:Entity) WHERE n.key IN $keys AND n.namespace IN $allowed "
+                    "RETURN n.key AS k, n.long_context AS ctx", keys=_keys, allowed=allowed)}
+                _texts = {kk: (_rows.get(kk) or kk) for kk in _keys}   # every fused key has text
+                # Supply-chain pin (security-audit LOW): pin the model REVISION so a future HF-side
+                # change to the tag can't alter what loads. SHA = the revision the 9jq on-path test ran.
+                fused = fuse.cross_encoder_rerank(query_text, fused, _texts,
+                                                  CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2",
+                                                               revision="c5ee24cb16019beea0893ab7796b1df96625c6b8"))
+                trace["rerank"] = {"applied": True, "order": [kk for kk, _ in fused]}
+            except ImportError:
+                trace["rerank"] = {"applied": False, "reason": "sentence-transformers absent; RRF order kept"}
+        else:
+            trace["rerank"] = {"applied": False, "reason": "rerank=False (default; $0 RRF-only)"}
         fused_keys = [kk for kk, _ in fused]
         primary = fused_keys[0]
         trace["fuse"] = {"fused_top": fused[:k]}

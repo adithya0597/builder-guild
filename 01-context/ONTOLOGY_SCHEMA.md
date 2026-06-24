@@ -193,6 +193,8 @@ Description tier and content tier are DISTINCT (PART 1 §3). A node is **well-fo
 
 Facts are NOT baked into `long_context` (keeps the embedding 0-hop); the node-card is assembled at READ = `long_context` + live bi-temporal edges (PART 3-B). Structured nodes (issues/agents/repos) carry no `pageindex_ref`; only long-doc nodes do. Demo: `01-context/schema/05_node_props.cypher`.
 
+**Known boundary (v1):** node *content* (`long_context`, `chunks`) is overwrite-in-place — only edges are bi-temporal, so there is **no as-of replay of a node's prior prose** (a content edit bumps `content_rev`/`dirty`; the previous text is not retained). Versioning is on the fact (edge), not the description (node). `serve.py:_host_freshness` propagates only the host **DIRTY** axis — host validity stays "current" by design. If description history ever becomes truth, it must be modeled as a fact-edge or a versioned-node snapshot (neither is in v1).
+
 ### §9-R — Recall-layer provenance + index-side hypothetical questions (FORWARD SPEC)
 
 Index-side hypothetical-question vectors (HyDE-style) are a **deferred** recall enhancement. This locks their provenance + quarantine contract now, while the design is fresh, so an LLM-generated search vector can never be confused with a canonical fact. Nothing here is applied yet — no such vectors exist (the recall layer is not built).

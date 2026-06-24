@@ -37,17 +37,44 @@ def vector_available(s):
     return s.run("MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) AS c").single()["c"] > 0
 
 
+def _vector_query(s, allowed, qv, k):
+    """Escalating post-filtered ANN over node_embedding (10o recall-cliff fix).
+    db.index.vector.queryNodes returns top-N by cosine BLIND to namespace; we post-filter to the
+    role's slice. A FIXED over-fetch (the old k*5) can return <k in-scope under HIGH namespace
+    selectivity — in-scope hits ranked beyond the window are silently lost (the recall cliff).
+    Fix: ESCALATE the over-fetch (k*5, then *5 each round) capped at the embedded-node count, until
+    >=k in-scope hits OR the whole embedded set has been scanned (worst case = exact scan, no cliff).
+    Cheap in the common low-selectivity case (k*5 returns immediately)."""
+    total = s.run("MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) AS c").single()["c"]
+    Q = ("CALL db.index.vector.queryNodes('node_embedding', $over, $q) YIELD node, score "
+         "WHERE node.namespace IN $allowed "
+         "RETURN node.key AS key, node.namespace AS ns, score ORDER BY score DESC LIMIT $k")
+    over = k * 5
+    while True:
+        hits = s.run(Q, q=qv, allowed=allowed, k=k, over=min(over, max(total, 1))).data()
+        if len(hits) >= k or over >= total:
+            return hits
+        over *= 5
+
+
 def vector_rung(s, allowed, text, k=3):
-    """Rung 2 (INT-2): real vector recall. Embed the query (local EmbeddingGemma),
-    queryNodes the HNSW index, then NAMESPACE-FILTER to the role's slice and cap at k.
-    Over-fetch (k*5) so namespace filtering still yields up to k in-scope hits."""
-    from embed import embed
-    qv = embed(text)
-    return s.run(
-        "CALL db.index.vector.queryNodes('node_embedding', $over, $q) YIELD node, score "
-        "WHERE node.namespace IN $allowed "
-        "RETURN node.key AS key, node.namespace AS ns, score ORDER BY score DESC LIMIT $k",
-        q=qv, allowed=allowed, k=k, over=k * 5).data()
+    """Rung 2 (INT-2): real vector recall. Embed the query (local EmbeddingGemma), queryNodes the
+    HNSW index, NAMESPACE-FILTER to the role's slice, cap at k. The over-fetch ESCALATES to defeat
+    the recall cliff under high namespace selectivity (see _vector_query, 10o).
+    OPTIONAL-DEP RESILIENCE: vector is an escalation rung — if the OPTIONAL embedder
+    (sentence-transformers) is absent, return [] so the graph/keyword rungs still serve (the
+    $0/local core runs without it). NARROW catch (red-team RT-1): sentence_transformers is
+    lazy-imported INSIDE embed(), so the catch must wrap embed(text) — but only a missing
+    sentence_transformers degrades; ANY OTHER ModuleNotFoundError (torch / a broken ST backend /
+    embed / neo4j) PROPAGATES, so a genuinely broken embedder can't masquerade as 'no vector hits'."""
+    try:
+        from embed import embed
+        qv = embed(text)
+    except ModuleNotFoundError as e:
+        if e.name == "sentence_transformers":     # optional embedder absent -> graceful degrade
+            return []
+        raise                                     # real failure (torch/embed/neo4j/...) -> surface it
+    return _vector_query(s, allowed, qv, k)
 
 
 def retrieve(query):
@@ -109,5 +136,46 @@ def demo():
     print("INT2_OK")
 
 
+def _recall_selftest():
+    """10o recall-cliff self-test — NO ML dep (synthetic vectors), runs on live Neo4j.
+    Seeds 50 OUT-namespace nodes whose embedding == the query vector (cosine 1.0, so they occupy the
+    top ANN ranks) and 1 IN-namespace node at cosine ~0.9 (ranked below the OUT block). A FIXED
+    over-fetch of 5 returns only OUT nodes -> 0 in-scope (the cliff); the escalating _vector_query
+    must still find the IN node. Proves the fix defeats the cliff without real embeddings."""
+    import sys
+    D = 768
+    qv = [1.0] + [0.0] * (D - 1)
+    out_vec = [1.0] + [0.0] * (D - 1)               # cosine 1.0 to qv -> top ranks
+    in_vec = [0.9, 0.4358899] + [0.0] * (D - 2)     # cosine ~0.9 to qv -> ranked below the OUT block
+    NS_IN, NS_OUT = "recall_test_in", "recall_test_out"
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        s.run("MATCH (n:Entity) WHERE n.namespace STARTS WITH 'recall_test' DETACH DELETE n")
+        try:
+            for i in range(50):
+                s.run("CREATE (n:Entity {key:$k, namespace:$ns, embedding:$v})",
+                      k=f"rt:out:{i}", ns=NS_OUT, v=out_vec)
+            s.run("CREATE (n:Entity {key:'rt:in:1', namespace:$ns, embedding:$v})", ns=NS_IN, v=in_vec)
+            s.run("CALL db.awaitIndexes()")
+            # the OLD fixed k*5=5 over-fetch (simulated) misses the in-scope node = the cliff:
+            fixed = s.run(
+                "CALL db.index.vector.queryNodes('node_embedding', 5, $q) YIELD node "
+                "WHERE node.namespace = $ns RETURN node.key AS k", q=qv, ns=NS_IN).data()
+            # the ESCALATING query (the fix) finds it:
+            got = _vector_query(s, [NS_IN], qv, k=1)
+        finally:                                  # RT-3: crash-safe cleanup (shared local DB)
+            s.run("MATCH (n:Entity) WHERE n.namespace STARTS WITH 'recall_test' DETACH DELETE n")
+    fixed_found = any(r["k"] == "rt:in:1" for r in fixed)
+    esc_found = any(r["key"] == "rt:in:1" for r in got)
+    print(f"[recall] fixed k*5 found in-scope? {fixed_found} (expect False = the cliff) | "
+          f"escalating found? {esc_found} (expect True = fixed)")
+    if not esc_found or fixed_found:
+        print("RECALL_SELFTEST_FAIL"); sys.exit(1)
+    print("RECALL_SELFTEST_OK")
+
+
 if __name__ == "__main__":
-    demo()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--recall-selftest":
+        _recall_selftest()
+    else:
+        demo()
