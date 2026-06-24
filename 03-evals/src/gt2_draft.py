@@ -20,8 +20,54 @@ import sys
 from neo4j import GraphDatabase
 from golden import normal_item, null_item, temporal_item, validate_item, write_golden, read_golden
 
+# 01-context/src on path for the self-owned-fixture seeders (mirrors eval_corrective.py convention).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "01-context", "src"))
+from mutate import resolve_entity, apply_edge
+
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# oz4 self-owned transient fixture: the eng+fin slice this drafter reads. Seeded + torn down per run
+# so GT-2 drafts from a KNOWN reproducible slice instead of coupling to the shared mutable demo_seed
+# graph (which migrated SPI-* -> ACME-* and broke the hard-coded g["issue:SPI-2"] lookups). agent:cto
+# / agent:cfo are stable role nodes (referenced, never seeded/deleted). _slice() reads the whole
+# eng+fin namespace, so any real ACME nodes coexist harmlessly — draft() references only these keys.
+_FIXTURE_NOW = "2026-06-14T04:00:00Z"
+_FIXTURE_KEYS = ["issue:SPI-1", "issue:SPI-2", "issue:SPI-4", "issue:SPI-5"]
+
+
+def _cleanup_fixture(drv):
+    with drv.session() as s:
+        s.execute_write(lambda tx: tx.run(
+            "MATCH (n:Entity) WHERE n.key IN $keys DETACH DELETE n", keys=_FIXTURE_KEYS))
+
+
+def _seed_fixture(drv):
+    """Seed exactly the nodes/edges draft() reads: SPI-2 (eng, status=blocked, ASSIGNED_TO cto, BLOCKS
+    SPI-1) + SPI-1 (eng, ASSIGNED_TO cto, the block target) + SPI-4 (fin, ASSIGNED_TO cfo) + SPI-5
+    (fin, status=in_progress, forecast ctx). status lives in long_context as a 'status=' token (_slice
+    parses it); assignee/blocks come from edges."""
+    nodes = [
+        ("Issue", "issue:SPI-2", "engineering",
+         "Issue SPI-2 — rate-limit backoff for the inference client. status=blocked"),
+        ("Issue", "issue:SPI-1", "engineering", "Issue SPI-1 — bolt client timeout."),
+        ("Issue", "issue:SPI-4", "finance", "Issue SPI-4 — Q3 inference budget cap."),
+        ("Issue", "issue:SPI-5", "finance",
+         "Issue SPI-5 — Q4 cost forecast for cloud inference spend. status=in_progress"),
+    ]
+    with drv.session() as s:
+        for label, key, ns, long_ in nodes:
+            s.execute_write(lambda tx, l=label, k=key, n=ns, lc=long_: resolve_entity(
+                tx, l, k, _FIXTURE_NOW, n, short=k, long_=lc))
+        s.execute_write(lambda tx: apply_edge(tx, "issue:SPI-2", "ASSIGNED_TO", "agent:cto",
+                                              _FIXTURE_NOW, "engineering"))
+        s.execute_write(lambda tx: apply_edge(tx, "issue:SPI-2", "BLOCKS", "issue:SPI-1",
+                                              _FIXTURE_NOW, "engineering"))
+        s.execute_write(lambda tx: apply_edge(tx, "issue:SPI-1", "ASSIGNED_TO", "agent:cto",
+                                              _FIXTURE_NOW, "engineering"))
+        s.execute_write(lambda tx: apply_edge(tx, "issue:SPI-4", "ASSIGNED_TO", "agent:cfo",
+                                              _FIXTURE_NOW, "finance"))
 
 
 def _slice(s):
@@ -127,8 +173,14 @@ def write_review(items, path):
 
 def main():
     fail = []
-    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
-        g = _slice(s)
+    with GraphDatabase.driver(URI, auth=AUTH) as drv:
+        _cleanup_fixture(drv)                  # drop any stale prior fixture first
+        try:
+            _seed_fixture(drv)                 # oz4: self-owned transient slice (vs the shared seed)
+            with drv.session() as s:
+                g = _slice(s)
+        finally:
+            _cleanup_fixture(drv)              # always tear down, even on error — g is already captured
     items = draft(g)
 
     # 1) every draft is schema-valid
