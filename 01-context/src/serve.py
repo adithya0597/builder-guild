@@ -171,8 +171,11 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                     "MATCH (n:Entity) WHERE n.key IN $keys AND n.namespace IN $allowed "
                     "RETURN n.key AS k, n.long_context AS ctx", keys=_keys, allowed=allowed)}
                 _texts = {kk: (_rows.get(kk) or kk) for kk in _keys}   # every fused key has text
+                # Supply-chain pin (security-audit LOW): pin the model REVISION so a future HF-side
+                # change to the tag can't alter what loads. SHA = the revision the 9jq on-path test ran.
                 fused = fuse.cross_encoder_rerank(query_text, fused, _texts,
-                                                  CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2"))
+                                                  CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2",
+                                                               revision="c5ee24cb16019beea0893ab7796b1df96625c6b8"))
                 trace["rerank"] = {"applied": True, "order": [kk for kk, _ in fused]}
             except ImportError:
                 trace["rerank"] = {"applied": False, "reason": "sentence-transformers absent; RRF order kept"}
