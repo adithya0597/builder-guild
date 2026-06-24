@@ -38,7 +38,7 @@ NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl
 CTX_EVALS_SHA = "demo-sha-context-evals-0001"
 
 # the demo-critical nodes the embedding-path demos structurally depend on (presence + embedding)
-DEMO_CRITICAL = ["issue:ACME-2", "issue:ACME-4", "extsrc:context-evals"]
+DEMO_CRITICAL = ["issue:ACME-2", "issue:ACME-4", "issue:ACME-9", "extsrc:context-evals"]
 
 
 def seed_extras(session, now=NOW):
@@ -53,6 +53,14 @@ def seed_extras(session, now=NOW):
         tx, "Issue", "issue:ACME-4", now, "finance",
         short="Issue ACME-4: Q3 inference budget cap",
         long_="Issue ACME-4 — Q3 inference budget cap controlling embedding and GPU inference spend."))
+    # eval_corrective T1/T3: an UNSUPPORTED engineering issue (NO outgoing edges) — blocking-themed
+    # content so it wins the initial RRF -> primary UNSUPPORTED -> abstain; the corrective loop then
+    # flips deterministically via pattern_synth ("blocks ACME-1" -> who BLOCKS ACME-1 -> issue:ACME-2,
+    # which IS ASSIGNED_TO cto -> SUPPORTED -> pass). ACME-9 itself stays edge-less (the abstain node).
+    session.execute_write(lambda tx: resolve_entity(
+        tx, "Issue", "issue:ACME-9", now, "engineering",
+        short="Issue ACME-9: sprint blocker",
+        long_="Issue ACME-9 — a sprint blocker blocking downstream release work; nothing proceeds until ACME-9 is resolved."))
     # serve-join long-doc node (shared): pageindex_ref + a NON-EMPTY doc-sha => deep_warranted signal.
     session.execute_write(lambda tx: resolve_entity(
         tx, "ExternalSource", "extsrc:context-evals", now, "shared",

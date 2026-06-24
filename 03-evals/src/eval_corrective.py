@@ -12,20 +12,24 @@ Tests:
 
 Prints CORRECTIVE_OK iff all six pass. sys.exit(1) on any failure.
 
-T1 golden case (real seeded ACME data, verified against the local Neo4j graph 2026-06-14):
-    query = "SPI-3 blocking SPI-6"  role = "engineering"
+T1 golden case (seeded ACME data; demo_seed.py adds issue:ACME-9 as the unsupported abstain node):
+    query = "ACME-9 blocks ACME-1"  role = "engineering"
     Initial call:
-        keyword_rung: [issue:SPI-3, issue:SPI-6] (sorted)
-        vector_rung: [issue:SPI-6 (rank1), issue:SPI-7, ...]
-        RRF: issue:SPI-6 wins (keyword rank2 + vector rank1 > keyword rank1 alone)
-        primary = issue:SPI-6  (no outgoing edges -> UNSUPPORTED -> abstain)
-    Corrective rewrite tactic = id_extract (fires first):
-        extracts ['SPI-3', 'SPI-6'] from query (regex [A-Za-z]+-\\d+)
-        re-serves with query='SPI-3 SPI-6', pattern=None
-        primary = issue:SPI-3  (has ASSIGNED_TO -> agent:cto -> SUPPORTED -> pass)
-    resolved_at = "rewrite:id_extract"  decision = "pass"
+        keyword_rung: [issue:ACME-1, issue:ACME-9] (sorted)
+        vector_rung: issue:ACME-9 ranks #1 (blocking-themed content)
+        RRF: issue:ACME-9 wins -> primary = issue:ACME-9 (no outgoing edges -> UNSUPPORTED -> abstain)
+    Corrective loop (tactics in order; id_extract re-query "ACME-9 ACME-1" still abstains):
+        pattern_synth fires: verb "blocks" -> BLOCKS, object after verb = ACME-1
+        re-serves query='' + pattern {rel:BLOCKS, obj:issue:ACME-1} (graph_rung only)
+        graph_rung: who BLOCKS issue:ACME-1 -> issue:ACME-2 (ASSIGNED_TO -> agent:cto -> SUPPORTED -> pass)
+    resolved_at = "rewrite:pattern_synth"  decision = "pass"
 
-    Verified live on the local Neo4j ACME graph.
+    Verified live on the seeded ACME graph (etl.py + demo_seed.py).
+
+REQUIRES sentence-transformers (the vector rung): T1's initial-abstain depends on issue:ACME-9
+winning the vector rung. Run with the embedding-capable venv (root .venv / requirements-dev);
+01-context/.venv lacks it -> the vector rung degrades to [] -> ACME-9 can't win -> the initial probe
+PASSES (not abstain) -> CORRECTIVE_FAIL. That is an environment requirement, not a bug.
 """
 import os
 import sys
@@ -55,21 +59,25 @@ def _run_test(name, fn):
 # T1: flip — weak phrasing that initially abstains -> rewrite -> pass
 # ---------------------------------------------------------------------------
 def t1_flip():
-    """Query "SPI-3 blocking SPI-6" with role=engineering.
+    """Query "ACME-9 blocks ACME-1" with role=engineering.
 
-    Initial: keyword=[SPI-3, SPI-6], vector=[SPI-6 rank1, SPI-7, ...].
-    RRF: issue:SPI-6 wins (keyword rank2 + vector rank1 > keyword rank1 alone).
-    primary=issue:SPI-6 (no outgoing edges -> UNSUPPORTED -> abstain).
+    Initial: keyword=[ACME-1, ACME-9], vector ranks issue:ACME-9 #1 (blocking-themed content).
+    RRF: issue:ACME-9 wins -> primary=issue:ACME-9 (no outgoing edges -> UNSUPPORTED -> abstain).
 
-    id_extract tactic (fires first):
-    Extracts ['SPI-3', 'SPI-6'] from query.
-    Re-serves with query='SPI-3 SPI-6', pattern=None.
-    primary=issue:SPI-3 (has ASSIGNED_TO -> agent:cto -> pass).
+    Corrective loop (tactics in order): id_extract re-query "ACME-9 ACME-1" still abstains;
+    pattern_synth fires: verb "blocks" -> BLOCKS, object after verb = ACME-1; re-serves query=''
+    + pattern {BLOCKS, obj:issue:ACME-1} (graph_rung only) -> who BLOCKS ACME-1 -> issue:ACME-2
+    (ASSIGNED_TO -> agent:cto -> SUPPORTED -> pass).
 
-    Verified live on the local Neo4j ACME graph 2026-06-14.
+    Verified live on the seeded ACME graph (etl.py + demo_seed.py).
+
+    NOTE (tactic drift from the prior SPI case): this resolves via pattern_synth (verb->relation
+    structural synthesis); the prior SPI-3/SPI-6 case resolved via id_extract. T1's contract is the
+    abstain->rewrite->pass arc (tactic-agnostic) -- it no longer specifically exercises id_extract's
+    RESOLVING path (a tracked follow-up).
     """
     # Use max_rewrites=3 so multiple tactics can fire if needed
-    r = corrective_serve("SPI-3 blocking SPI-6", "engineering", max_rewrites=3)
+    r = corrective_serve("ACME-9 blocks ACME-1", "engineering", max_rewrites=3)
     c = r["corrective"]
 
     # The initial attempt must have decision=abstain
@@ -136,10 +144,10 @@ def t2_bounded():
 def t3_no_op_guard():
     """Assert no (query, pattern) pair repeats across attempts.
 
-    Uses the same T1 query (SPI-3 blocking SPI-6) which produces >=2 attempts,
+    Uses the same T1 query (ACME-9 blocks ACME-1) which produces >=2 attempts,
     allowing the no-op guard to be meaningfully exercised.
     """
-    r = corrective_serve("SPI-3 blocking SPI-6", "engineering", max_rewrites=3)
+    r = corrective_serve("ACME-9 blocks ACME-1", "engineering", max_rewrites=3)
     c = r["corrective"]
 
     seen = set()
@@ -166,8 +174,8 @@ def t4_isolation():
     c = r["corrective"]
 
     eng_keys = {
-        "issue:SPI-1", "issue:SPI-2", "issue:SPI-3",
-        "issue:SPI-6", "issue:SPI-7", "agent:cto",
+        "issue:ACME-1", "issue:ACME-2", "issue:ACME-9",
+        "agent:cto", "agent:eng1", "project:acme", "repo:acme/api",
     }
 
     # The corrective result's primary (if any) must not be an engineering node
