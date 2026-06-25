@@ -13,10 +13,14 @@ RAG-pattern coverage (see `01-context/RETRIEVAL.md` + `HYBRID_RETRIEVAL_ARCHITEC
 - **Multimodal RAG** — ✗ NOT built (text-only) → gap **G2** below.
 
 **Gate state: suggest-only.** `01-context/src/abstain.py` has `CALIBRATED=False` with provisional
-weights, so every decision routes to a human — autonomy is not leased. The last calibration run
-(the private spine, 2026-06-12 — *last-measured, not re-run since*) reported judge κ=1.0 but a
-FAILED coverage gate (sufficiency refit weight positive yet selective gain −3.0pp), so the gate
-correctly refuses to certify → trust track **G3** below.
+weights, so every decision routes to a human — autonomy is not leased. The calibration run recorded
+in `03-evals/CASE_STUDY_calibration.md` (N=10 human-validated golden, 6-namespace graph, external $0
+judge) measured a **+10.0pp selective gain** over confidence-alone (stable across three fits) yet
+**refused to certify** — because the sufficiency proxy refit with a **negative weight** (anti-correlated,
+−3.167 → −4.089: the selective gain came from confidence alone), the serving layer was only 40% correct
+on its own golden before the fixes (80% after), and **judge κ was unmeasurable** (8/10 items scored
+deterministically — N=10 is a smoke test). The gate correctly refuses on a broken sufficiency signal →
+trust track **G3** below.
 
 ## Near
 
