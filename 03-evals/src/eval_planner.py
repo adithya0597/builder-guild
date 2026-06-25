@@ -27,6 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "..", "02-agents", "src"))
 
 from planner import plan
+# bc7 self-owned transient fixture seeders (oz4 pattern; mirrors gt2_draft.py / eval_corrective.py).
+# Reuse mutate's URI/AUTH (the shared localhost dev cred) rather than re-inlining it — one source.
+from mutate import resolve_entity, apply_edge, URI, AUTH
 
 
 def _run_test(name, fn):
@@ -307,7 +310,7 @@ def _check_neo4j():
     """Fail fast with clear message if live graph is unreachable (mirrors eval_corrective)."""
     try:
         from neo4j import GraphDatabase
-        drv = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "companybrain"))
+        drv = GraphDatabase.driver(URI, auth=AUTH)
         drv.verify_connectivity()
         drv.close()
         return True
@@ -317,33 +320,81 @@ def _check_neo4j():
         return False
 
 
+# bc7 self-owned transient fixture (oz4 pattern; mirrors gt2_draft.py): the demo SEEDS the exact
+# 2-hop shape it asserts, namespaced to engineering, and DETACH DELETEs in finally — decoupling from
+# the shared mutable demo_seed graph, which migrated SPI-* -> ACME-*. The live graph now has 0 SPI
+# nodes (the edge model is RELATES_TO{name:...}, and the ASSIGNED_TO/BLOCKS edges that DO exist hang
+# off ACME-* nodes), so the OLD question 'SPI-3 blocking SPI-6' retrieved nothing and abstained ->
+# PLANNER_FAIL. The fixture re-establishes the named 2-hop independent of the demo_seed vocabulary.
+# agent:cto is a stable role node (referenced, never seeded/deleted), matching gt2_draft's treatment
+# of agent:cto / agent:cfo.
+_FIXTURE_NOW = "2026-06-14T04:00:00Z"
+_FIXTURE_KEYS = ["issue:SPI-3", "issue:SPI-6"]
+
+
+def _cleanup_fixture(drv):
+    with drv.session() as s:
+        s.execute_write(lambda tx: tx.run(
+            "MATCH (n:Entity) WHERE n.key IN $keys DETACH DELETE n", keys=_FIXTURE_KEYS))
+
+
+def _seed_fixture(drv):
+    """Seed the genuine 2-hop the demo asserts:
+      issue:SPI-6  — engineering, NO outgoing edges  -> the UNSUPPORTED probe-1 primary (abstain).
+      issue:SPI-3  — engineering, BLOCKS -> SPI-6 AND ASSIGNED_TO -> agent:cto -> the structural
+                     re-aim target whose ASSIGNED_TO edge carries the answer (owner = agent:cto).
+    The planner must (1) NOT confident-abstain on the no-facts SPI-6 (bc7 fix1: score_stop now also
+    requires retrieved facts), then (2) reach SPI-3 via the Branch-1 graph_pattern structural probe
+    (verb 'blocks' -> BLOCKS, obj issue:SPI-6 — bc7 fix2: the verb is taken from the ORIGINAL
+    question, surviving the id_extract step). agent:cto must already exist (seeded by demo_seed)."""
+    with drv.session() as s:
+        s.execute_write(lambda tx: resolve_entity(
+            tx, "Issue", "issue:SPI-6", _FIXTURE_NOW, "engineering",
+            short="issue:SPI-6", long_="Issue SPI-6 — downstream consumer, blocked by SPI-3."))
+        s.execute_write(lambda tx: resolve_entity(
+            tx, "Issue", "issue:SPI-3", _FIXTURE_NOW, "engineering",
+            short="issue:SPI-3", long_="Issue SPI-3 — the blocker; owned by the CTO."))
+        s.execute_write(lambda tx: apply_edge(
+            tx, "issue:SPI-3", "BLOCKS", "issue:SPI-6", _FIXTURE_NOW, "engineering"))
+        s.execute_write(lambda tx: apply_edge(
+            tx, "issue:SPI-3", "ASSIGNED_TO", "agent:cto", _FIXTURE_NOW, "engineering"))
+
+
 def demo():
-    """Live multi-step question: print each step and assert GENUINE-ANSWER criteria.
+    """Live multi-step question on a SELF-OWNED transient fixture: print each step + assert
+    GENUINE-ANSWER criteria.
 
-    Returns True iff the planner self-chose >=2 distinct retrievals, every step's
-    isolation was clean, AND the FINAL step is a genuine answer — decision in
-    {pass, partial} WITH non-empty evidence. (Neo4j gating is done by the caller in
-    __main__, mirroring eval_corrective.py.)
+    Returns True iff the planner self-chose >=2 distinct retrievals, every step's isolation was
+    clean, AND the FINAL step is a genuine answer — decision in {pass, partial} WITH the RELEVANT
+    evidence (the ASSIGNED_TO -> agent:cto fact). distinct_retrievals>=2 + isolation-clean ALONE is
+    NOT sufficient (codex MED-4): the relevant-evidence gate forecloses a hollow abstain->abstain.
 
-    distinct_retrievals>=2 + isolation-clean ALONE is NOT sufficient: that let a hollow
-    abstain->abstain (terminated on a tau-boundary score fluke) print PLANNER_OK. The
-    final-answer gate forecloses that.
-
-    Question is verified-live on the local Neo4j graph (see eval_corrective.py t1_flip docstring):
-    probe 1 -> primary=issue:SPI-6 (no outgoing edges -> UNSUPPORTED, presentable_facts=[]
-    -> abstain); the planner's Branch-1 id_extract re-query (query='SPI-3 SPI-6', pattern=
-    None) re-ranks to issue:SPI-3, which has ASSIGNED_TO -> agent:cto -> pass. Yields
-    distinct_retrievals=2, terminated_on=confidence, final decision=pass with evidence.
+    VERIFIED-LIVE MECHANISM (bc7, re-derived 2026-06-24 — supersedes the stale 'SPI-3 SPI-6 id_extract
+    re-rank' story, which broke when keyword_rung's deterministic sort + the ACME migration landed):
+      probe 1 (initial)      -> primary=issue:SPI-6, NO outgoing edges -> UNSUPPORTED -> abstain.
+                                self_conf=0.95 (exact-id keyword hit) -> score 0.599 >= tau, BUT
+                                has_facts=False so confident_abstain does NOT stop (fix1) -> re-aim.
+      probe 2 (id_extract)   -> re-query 'SPI-6' -> still SPI-6, still no facts -> re-aim again.
+      probe 3 (graph_pattern)-> structural probe {rel:BLOCKS, obj:issue:SPI-6} (verb from the
+                                ORIGINAL question, fix2) -> graph_rung returns issue:SPI-3, whose
+                                ASSIGNED_TO -> agent:cto fact -> pass.
+    Yields distinct_retrievals=3, terminated_on=confidence, final decision=pass with the owner fact.
     """
-    question = "SPI-3 blocking SPI-6"
-    # The asked relation is "who owns the blocker" — the seeded answer is agent:cto via an
-    # ASSIGNED_TO edge on issue:SPI-3 (verified live, eval_corrective.py t1_flip). The demo
-    # asserts THIS specific fact is present, not just that some non-empty text came back
-    # (codex MED-4: bool(presentable_facts or composed_evidence) rubber-stamps any blob).
+    from neo4j import GraphDatabase
+    question = "what blocks SPI-6 and who is it assigned to"
+    # The seeded answer is agent:cto via an ASSIGNED_TO edge on issue:SPI-3 (the blocker of SPI-6).
+    # Assert THIS specific fact is present, not just that some non-empty text came back (codex MED-4).
     EXPECTED_ENTITY = "agent:cto"
     EXPECTED_REL = "ASSIGNED_TO"
     print(f"\n[demo] question: {question!r}")
-    r = plan(question, "engineering", max_steps=4)
+    drv = GraphDatabase.driver(URI, auth=AUTH)
+    try:
+        _cleanup_fixture(drv)              # drop any stale prior fixture first
+        _seed_fixture(drv)                 # oz4 self-owned transient 2-hop
+        r = plan(question, "engineering", max_steps=4)
+    finally:
+        _cleanup_fixture(drv)              # always tear down, even on assertion error
+        drv.close()
     p = r["planner"]
 
     all_iso_clean = all(s["isolation_clean"] for s in p["steps"])
