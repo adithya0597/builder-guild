@@ -39,7 +39,7 @@ model runs on-box, no API.
 import sys
 from neo4j import GraphDatabase
 from mutate import resolve_entity
-from embed import embed_node, assert_chunk_namespace_isolation
+from embed import embed_node, assert_chunk_namespace_isolation, detect_kind
 
 URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
 NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl's NOW1/NOW2
@@ -108,13 +108,19 @@ def seed_extras(session, now=NOW):
 
 
 def embed_all(session, now=NOW):
-    """The embed-the-seed pass: embed EVERY content-bearing :Entity (768-d, kind=prose). Returns the
-    count embedded. Idempotent — re-running re-embeds (deterministic vectors, cheap on this size)."""
+    """The embed-the-seed pass: embed EVERY content-bearing :Entity (768-d). Returns the count
+    embedded. Idempotent — re-running re-embeds (deterministic vectors, cheap on this size).
+
+    5iz: kind is DETECTED per node (embed.detect_kind) instead of hardcoded 'prose', so a code-bearing
+    node ingested via the real pipeline is AST-chunked (chunk_code), not sentence-split. Every current
+    prose seed node still classifies prose -> identical behavior on today's seed; the fix only changes
+    routing for a future code node."""
     keys = [r["k"] for r in session.run(
         "MATCH (n:Entity) WHERE n.long_context IS NOT NULL RETURN n.key AS k ORDER BY k")]
     for k in keys:
         content = session.run("MATCH (n:Entity {key:$k}) RETURN n.long_context AS c", k=k).single()["c"]
-        session.execute_write(lambda tx, k=k, c=content: embed_node(tx, k, c, "prose", now))
+        kind = detect_kind(content)
+        session.execute_write(lambda tx, k=k, c=content, kd=kind: embed_node(tx, k, c, kd, now))
     return len(keys)
 
 

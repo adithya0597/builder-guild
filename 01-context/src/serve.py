@@ -228,17 +228,26 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
             crec = s.run(stamp.CARD_Q, key=kk, allowed=allowed).single()
             if crec is None:
                 return
+            # 3zy: tag BOTH presentation surfaces with the PARENT's live freshness ([fresh]/[stale])
+            # so a reader (and any downstream consumer) sees whether the surfaced prose/chunk text is
+            # current. Presentation-only + gate-SAFE: actionability still derives from the stamped facts
+            # below + the faithfulness gate (a dirty parent -> stale graph claims -> the gate refuses to
+            # ACT); this marker NEVER becomes a gate claim, it only annotates what is shown. Mirrors the
+            # node-vector lazy-refresh staleness window — a pre-existing pattern, not a cf7 regression.
+            # The [..] marker sits AFTER the (kk) token so existing content(kk)/content_chunk(kk) prefix
+            # matches (and the isolation issue:/agent: regex) are unaffected.
+            pmark = "stale" if crec["node_dirty"] else "fresh"
             ctx = s.run("MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
                         "RETURN n.long_context AS ctx", k=kk, allowed=allowed).single()
             if ctx and ctx["ctx"]:
-                composed.append(f"content({kk}): {ctx['ctx'][:200]}")
+                composed.append(f"content({kk}) [{pmark}]: {ctx['ctx'][:200]}")
             # bzr: a node retrieved via chunk-vector (rung 2b) surfaces its SELECTED passage — the chunk
             # the query actually matched — not just the long_context abstract (whose [:200] truncation may
             # cut before the relevant span). Only the ONE selected chunk is surfaced (chunk_passages is
             # already deduped to the best passage per parent), so this never bloats the answer with all
             # chunks (the bzr concern). This is the read that makes embed.py's n.chunks no longer dead.
             if kk in chunk_passages:
-                composed.append(f"content_chunk({kk}): {chunk_passages[kk][:200]}")
+                composed.append(f"content_chunk({kk}) [{pmark}]: {chunk_passages[kk][:200]}")
             for f in stamp.freshness_judge(stamp.stamp_card(crec)):
                 composed.append(f"{kk}: {f['fact']}")
                 m = re.search(r"->\s*(\S+)", f["fact"])

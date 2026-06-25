@@ -52,6 +52,23 @@ def chunk_code(src):
     return chunks or [src]
 
 
+def detect_kind(content):
+    """Prose-vs-code classifier for the real seeding path (5iz). Content is 'code' iff it parses as
+    Python AND defines >=1 top-level function/class — exactly the unit chunk_code splits on, so the
+    classifier and the chunker agree by construction. Anything that fails to parse, OR parses but is
+    a bare script / prose that happens to be valid Python (e.g. 'status=open'), is 'prose'. This stops
+    embed_all from AST-vs-sentence mis-chunking: a real code blob now routes to chunk_code, while every
+    existing prose node still classifies prose (no behavior change on the current seed)."""
+    if not content:                               # None/empty -> prose (ast.parse(None) would TypeError)
+        return "prose"
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return "prose"
+    return "code" if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                         for n in tree.body) else "prose"
+
+
 def embed(text):
     return _model().encode(text, normalize_embeddings=True).tolist()
 

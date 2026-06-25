@@ -143,16 +143,21 @@ def _choose_next(question, current_query, current_pattern, step_result, tried):
             pk = _probe_key(nq, None)
             if pk not in tried:
                 return nq, None, "id_extract", f"no facts: re-query with extracted ids={ids}"
-        # Tactic 2: graph_pattern — verb->relation + object-key structural probe
-        rel, verb_tok = _extract_verb_rel(current_query or "")
-        if rel and ids:
-            after, before = _split_ids_by_verb(current_query or "", verb_tok, ids)
+        # Tactic 2: graph_pattern — verb->relation + object-key structural probe. Derive verb+ids
+        # from the ORIGINAL `question`, NOT current_query (bc7): Tactic 1 (id_extract) replaces
+        # current_query with ids-only, stripping the verb — so by the time Tactic 1 is exhausted and
+        # Tactic 2 becomes reachable, a current_query-sourced _extract_verb_rel finds no verb and the
+        # structural re-aim is dead. The original question retains the verb that names the relation.
+        q_rel, q_verb = _extract_verb_rel(question or "")
+        q_ids = _extract_ids(question or "")
+        if q_rel and q_ids:
+            after, before = _split_ids_by_verb(question or "", q_verb, q_ids)
             for obj_id in (after + before):
                 obj = obj_id if ":" in obj_id else f"issue:{obj_id}"
-                pat = {"rel": rel, "obj": obj}
+                pat = {"rel": q_rel, "obj": obj}
                 pk = _probe_key("", pat)
                 if pk not in tried:
-                    return "", pat, "graph_pattern", f"no facts: structural re-aim rel={rel} obj={obj}"
+                    return "", pat, "graph_pattern", f"no facts: structural re-aim rel={q_rel} obj={obj}"
 
     # Branch 2: has facts, still abstain — neighbor-hop. (partial is unreachable here:
     # plan() terminates on partial before _choose_next runs, so abstain-only is correct.)
@@ -263,8 +268,16 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
         #   - score>=tau while still abstaining       -> "confident_abstain" (NOT an answer)
         # escalate terminates the loop (no point re-probing a human-routed decision) but is
         # never dishonestly counted as a confident answer.
+        #
+        # has_facts GUARD on confident_abstain (bc7): a no-facts UNSUPPORTED primary derives its
+        # score from selective_score(suf=0.0, self_conf) — i.e. PURE embedding/structural cosine
+        # with ZERO retrieved support — which crosses tau whenever self_conf>=0.75 (e.g. an
+        # exact-id keyword hit gets self_conf=0.95 -> score 0.599). Honoring that as a "confident
+        # abstain" STOP short-circuits the very Branch-1 structural re-aim that _has_facts() mandates
+        # for an UNSUPPORTED primary (see _has_facts docstring). So a confident_abstain only
+        # TERMINATES when actual facts back the score; a no-facts high-cosine abstain keeps re-aiming.
         answered = decision in ("pass", "partial")
-        score_stop = score is not None and score >= tau
+        score_stop = score is not None and score >= tau and _has_facts(r)
         if answered:
             terminated_on = "confidence"
             break

@@ -87,12 +87,18 @@ def _chunk_vector_query(s, allowed, qv, k):
     chunks, resolve each to its parent :Entity, and DEDUPE to the best-scoring chunk per parent (one
     parent = one fused hit, carrying its best-matching passage in `chunk`). Escalate the over-fetch
     until >=k DISTINCT in-scope parents OR the whole chunk set is scanned (worst case = exact scan, no
-    cliff). Rows arrive score-desc, so the first chunk seen per parent is that parent's best passage."""
+    cliff). Rows arrive score-desc, so the first chunk seen per parent is that parent's best passage.
+
+    emh (scale): the escalating SCAN returns only lightweight identity+score per chunk
+    (parent_key/ns/chunk_key/score) — NOT the full passage text. node.text is fetched in ONE
+    namespace-scoped follow-up read for just the <=k deduped SURVIVORS (the passages serve actually
+    surfaces), so a high-selectivity full scan no longer drags every chunk's text across the wire on
+    every round. Return shape is unchanged: [{key, ns, chunk_key, chunk(text), score}]."""
     total = s.run("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS c").single()["c"]
     Q = ("CALL db.index.vector.queryNodes('chunk_embedding', $over, $q) YIELD node, score "
          "WHERE node.namespace IN $allowed "
          "RETURN node.parent_key AS key, node.namespace AS ns, node.key AS chunk_key, "
-         "       node.text AS chunk, score ORDER BY score DESC")
+         "       score ORDER BY score DESC")
     over = k * 5
     while True:
         rows = s.run(Q, q=qv, allowed=allowed, over=min(over, max(total, 1))).data()
@@ -100,7 +106,16 @@ def _chunk_vector_query(s, allowed, qv, k):
         for r in rows:
             best.setdefault(r["key"], r)
         if len(best) >= k or over >= total:
-            return list(best.values())[:k]
+            survivors = list(best.values())[:k]
+            # fetch the SELECTED passage text only for the survivors, by chunk_key, in one read;
+            # namespace-scoped (belt + suspenders — survivors already passed the scan's ns filter).
+            ckeys = [r["chunk_key"] for r in survivors]
+            texts = {t["ck"]: t["txt"] for t in s.run(
+                "MATCH (c:Chunk) WHERE c.key IN $ck AND c.namespace IN $allowed "
+                "RETURN c.key AS ck, c.text AS txt", ck=ckeys, allowed=allowed)}
+            for r in survivors:
+                r["chunk"] = texts.get(r["chunk_key"])
+            return survivors
         over *= 5
 
 
