@@ -55,3 +55,8 @@ audits/
 # Beads issue tracker — local project management; issues.jsonl references git-ignored audits/ and
 # internal decisions, so keep the whole tracker out of the public repo.
 .beads/
+
+# Conductor: monorepo harness is symlinked into worktrees at setup, never committed (public repo).
+# Pattern has NO trailing slash so it also ignores a SYMLINK named .claude (git treats symlinks as files).
+.claude
+.conductor/settings.local.toml
