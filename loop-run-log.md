@@ -23,4 +23,8 @@ in git history) is **not** a run and must not be recorded as one.
 
 ## Recent Runs
 
-<!-- Loop appends below this line. None yet. -->
+<!-- Loop appends below this line. tokens_estimate is unmetered (no live token meter exposed to the loop). -->
+
+```json
+{"run_id": "2026-06-29T15:57:35Z", "pattern": "daily-triage", "duration_s": 276, "items_found": 2, "actions_taken": 0, "escalations": 0, "tokens_estimate": 30000, "outcome": "report-only"}
+```
