@@ -4,11 +4,12 @@ F1: a node-card is assembled at READ = long_context (stable) + a LIVE bi-tempora
 edge query, role-scoped by namespace and validity+freshness stamped. Nothing fact-inclusive is
 cached — the card is built per request, so it is always current (PART 3-B).
 """
+import os
 import re
 import yaml
 from pathlib import Path
 from neo4j import GraphDatabase
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 # arity:1 relations — a functional relation with >1 current edge is an exactly-one-current breach
 # that reconcile must quarantine (ambiguous_functional). Sourced from the rule contract, not hardcoded.
 FUNCTIONAL_RELS = {r for r, spec in

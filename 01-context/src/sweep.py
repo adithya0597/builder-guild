@@ -10,10 +10,11 @@ ONTOLOGY_SCHEMA §11.)
 sweep_queue_depth() is the FIX-STALE liveness monitor: it emits the re-embed backlog as a metric
 and raises an alarm above a threshold, so cold dirty nodes can't silently rot.
 """
+import os
 import sys
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 QUEUE_ALARM_THRESHOLD = 1000   # dirty backlog above this -> alarm (sweep falling behind)
 
 

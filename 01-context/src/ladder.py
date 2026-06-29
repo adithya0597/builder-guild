@@ -5,9 +5,10 @@ Escalate only when the lower rung is insufficient (eval-gated). The graph SCOPES
 Per M1 DoD the graph rung is the spine; vector (needs embeddings -> D3) and PageIndex
 (pilot -> H1) are the design's deferred eval-gated escalation rungs.
 """
+import os
 import re
 from neo4j import GraphDatabase
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 
 
 def keyword_rung(s, allowed, text):

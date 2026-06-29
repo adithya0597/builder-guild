@@ -13,10 +13,11 @@ POLICY NOTE: pruning trades bi-temporal replay BEYOND the window for bounded sto
 a FOUNDER decision (audit/compliance vs cost), so prune is opt-in and never the default. Current
 edges (invalid_at = SENTINEL 9999-12-31, i.e. invalid_at > now) are NEVER deleted.
 """
+import os
 import sys
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 SENTINEL = "9999-12-31T00:00:00Z"
 
 

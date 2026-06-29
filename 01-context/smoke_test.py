@@ -1,8 +1,9 @@
 """A2 smoke test: neo4j-graphrag-python client connects + write + read-back."""
+import os
 from neo4j import GraphDatabase  # bundled by neo4j-graphrag-python
 
-URI = "bolt://localhost:7687"
-AUTH = ("neo4j", "companybrain")  # local dev
+URI = os.environ.get("NEO4J_URI", "bolt://localhost:7688")
+AUTH = ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))  # local dev
 
 
 def main() -> None:

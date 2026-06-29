@@ -4,11 +4,12 @@ MERGE / MATCH-SET, per the relations.yaml rules. ZERO LLM (pure neo4j driver, no
 SOURCE = FIXTURE stand-in (live tracker API is down). To go live, replace fetch_source()
 with the neo4j-graphrag/tracker client GET; everything downstream is unchanged.
 """
+import os
 from neo4j import GraphDatabase
 from datetime import datetime, timezone
 import mutate   # R3: the single write ENGINE by convention (not DB-enforced); invariant_check.py is the >1-current backstop
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 
 
 def fetch_source(status_acme1="open"):

@@ -20,12 +20,13 @@ Modes:
 Complements reconcile.py's per-read n_current>1 guard (which protects a single serve read)
 with a whole-graph periodic assertion.
 """
+import os
 from neo4j import GraphDatabase
 from pathlib import Path
 import sys
 import yaml
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")  # local/CI dev cred (not a secret)
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))  # local/CI dev cred (not a secret)
 
 # arity:1 relations from the same source serve/reconcile use — the ones that MUST be single-current
 FUNCTIONAL_RELS = sorted(

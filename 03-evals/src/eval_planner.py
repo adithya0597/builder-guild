@@ -315,7 +315,7 @@ def _check_neo4j():
         drv.close()
         return True
     except Exception as e:
-        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7687 ({type(e).__name__}: {e}).")
+        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7688 ({type(e).__name__}: {e}).")
         print("  demo() is a live integration test; bring up the ACME graph first.")
         return False
 

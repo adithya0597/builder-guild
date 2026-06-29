@@ -24,7 +24,7 @@ from golden import read_golden
 from scope import allowed_namespaces
 import ladder
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 

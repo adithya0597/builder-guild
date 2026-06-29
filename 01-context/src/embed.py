@@ -13,12 +13,13 @@ multi-chunk recall lives on :Chunk nodes, NOT a vector-list on :Entity (supersed
 A SINGLE-chunk node gets NO :Chunk node — its passage is long_context, returned directly (HYBRID §3; bzr).
 ZERO external API — the model runs locally.
 """
+import os
 import ast
 import sys
 from functools import lru_cache
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 MODEL = "google/embeddinggemma-300m"
 
 

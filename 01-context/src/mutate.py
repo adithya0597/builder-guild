@@ -18,12 +18,13 @@ Spec honored (ONTOLOGY_SCHEMA §10 / §7):
     supersede/remove sets invalid_at = now. current = (invalid_at > now). expired_at stays ABSENT
     on a current edge (set only on supersede/remove).
 """
+import os
 import sys
 import yaml
 from pathlib import Path
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 SENTINEL = "9999-12-31T00:00:00Z"   # current edge carries invalid_at = SENTINEL (never absent); supersede -> invalid_at = now
 RULES = yaml.safe_load((Path(__file__).parent.parent / "schema" / "relations.yaml").read_text())["relations"]
 

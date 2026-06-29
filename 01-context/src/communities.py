@@ -331,8 +331,8 @@ def demo():
     import os
     from neo4j import GraphDatabase
 
-    URI = "bolt://localhost:7687"
-    AUTH = ("neo4j", "companybrain")
+    URI = os.environ.get("NEO4J_URI", "bolt://localhost:7688")
+    AUTH = ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
     FIXED_NOW = "2026-06-14T00:00:00"
     FIXED_RUN = "demo-run-1"
 

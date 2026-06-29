@@ -11,10 +11,11 @@ Naming note (coordinated with FIX-RECON): `validity` and `fresh` are the two ORT
 axes of a fact's trustworthiness — a fact can be current-but-stale (node edited, edge still valid)
 or historical-but-clean. They are never collapsed into one "confidence" scalar.
 """
+import os
 import sys
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 
 # one node-card: the source node's dirty flag + every outgoing fact's bi-temporal validity
 CARD_Q = """

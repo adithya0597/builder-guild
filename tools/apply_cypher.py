@@ -9,10 +9,11 @@ Scope: SCHEMA files only (CREATE CONSTRAINT / CREATE INDEX, IF NOT EXISTS — id
 re-runs safely). The splitter strips `//` line comments and splits on `;`; it does NOT
 handle a `;`/`//` embedded inside a string literal, which schema DDL does not contain.
 """
+import os
 import sys
 from neo4j import GraphDatabase
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")  # local/CI dev cred (not a secret)
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))  # local/CI dev cred (not a secret)
 
 
 def statements(text):

@@ -224,12 +224,12 @@ def t3_env_at_call_time():
 def _check_neo4j():
     try:
         from neo4j import GraphDatabase
-        drv = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "companybrain"))
+        drv = GraphDatabase.driver(os.environ.get("NEO4J_URI", "bolt://localhost:7688"), auth=("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain")))
         drv.verify_connectivity()
         drv.close()
         return True
     except Exception as e:
-        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7687 ({type(e).__name__}: {e}).")
+        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7688 ({type(e).__name__}: {e}).")
         print("  T4 (neo4j demo) requires the live graph. T1-T3 are standalone.")
         return False
 
@@ -298,7 +298,7 @@ def t4_neo4j_demo():
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
         png_path = tf.name
-    URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+    URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 
     def _cleanup(drv):
         with drv.session() as s:

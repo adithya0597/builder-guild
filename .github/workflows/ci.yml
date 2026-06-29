@@ -67,7 +67,7 @@ jobs:
         env:
           NEO4J_AUTH: neo4j/companybrain
         ports:
-          - 7687:7687
+          - 7688:7687
         options: >-
           --health-cmd "cypher-shell -u neo4j -p companybrain 'RETURN 1'"
           --health-interval 10s

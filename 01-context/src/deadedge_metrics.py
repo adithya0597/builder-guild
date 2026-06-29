@@ -10,10 +10,11 @@ p50/p95; rel_invalid_at index seek present; optional store size. Emits a VERDICT
 green) vs revisit-cold-tier (a signal breached). Metrics are graph-WIDE (dead edges accumulate across
 every namespace) — this is an ops/storage metric, not a role-scoped serve read.
 """
+import os
 from neo4j import GraphDatabase
 import argparse, json, time
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 
 # --- trigger thresholds: INITIAL heuristics (LABELED-ESTIMATE) — the memo is explicit these are SET
 #     BY MEASUREMENT, not guessed. The baseline run is the first data point; tune as history grows. ---

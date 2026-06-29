@@ -36,12 +36,13 @@ EmbeddingGemma vector via embed.embed_node (kind=prose). When a node splits into
 also materializes one indexed :Chunk per chunk (cf7); single-chunk nodes get none. $0 / local — the
 model runs on-box, no API.
 """
+import os
 import sys
 from neo4j import GraphDatabase
 from mutate import resolve_entity
 from embed import embed_node, assert_chunk_namespace_isolation, detect_kind
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl's NOW1/NOW2
 
 # A fixed, NON-EMPTY stand-in tree-sha (a real PageIndex deploy stamps the true sha). Non-empty is

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "..", "01-context", "src"))
 from mutate import resolve_entity, apply_edge
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # oz4 self-owned transient fixture: the eng+fin slice this drafter reads. Seeded + torn down per run

@@ -22,12 +22,13 @@ Modes:
 Sibling of invariant_check.py (the >1-current backstop). Together they are the "continuous invariant
 detection" half of the application-enforced write gateway (crk) — NOT DB-enforced.
 """
+import os
 from neo4j import GraphDatabase
 from pathlib import Path
 import sys
 import yaml
 
-URI, AUTH = "bolt://localhost:7687", ("neo4j", "companybrain")  # local/CI dev cred (not a secret)
+URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))  # local/CI dev cred (not a secret)
 
 # graph_invariant (acyclic) relations from the same schema the engine reads — the ones whose CURRENT
 # edge set must stay a DAG (DEPENDS_ON, SUPERSEDES). Derived, so adding a graph_invariant rel auto-covers it.
