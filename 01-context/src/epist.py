@@ -8,6 +8,8 @@ Source epistemic roles (authority for a FACT claim):
   vector    = recall-only     — surfaces candidates; never authoritative on its own (a vector hit
                                 is a lexical/semantic neighbor, which is why a stale chunk can
                                 contradict the live graph)
+  community = enrichment-only — GraphRAG cluster context (serve.py, o46); below graph in every
+                                role, never folds into a fact claim
 Weights are per-ROLE tunable (different CXO slices can re-rank prose vs fact authority); a default
 profile is provided. Conflict on a (subject,predicate) SLOT is resolved by: highest source
 authority first, then bi-temporal validity (current > historical) — deterministic, auditable.
@@ -16,10 +18,10 @@ A genuine SAME-authority, both-current conflict is SURFACED, never silently pick
 import sys
 
 # default per-source authority for FACT claims; ROLE_WEIGHTS can override per CXO role
-DEFAULT_AUTHORITY = {"graph": 1.0, "pageindex": 0.7, "vector": 0.3}
+DEFAULT_AUTHORITY = {"graph": 1.0, "pageindex": 0.7, "vector": 0.3, "community": 0.2}
 ROLE_WEIGHTS = {
-    "engineering": {"graph": 1.0, "pageindex": 0.6, "vector": 0.3},   # facts dominate
-    "comms":       {"graph": 0.8, "pageindex": 1.0, "vector": 0.4},   # prose dominates
+    "engineering": {"graph": 1.0, "pageindex": 0.6, "vector": 0.3, "community": 0.2},   # facts dominate
+    "comms":       {"graph": 0.8, "pageindex": 1.0, "vector": 0.4, "community": 0.2},   # prose dominates
     "_default":    DEFAULT_AUTHORITY,
 }
 

@@ -74,7 +74,7 @@ relations:
     contradiction: {collision_key: path, resolution: graph_invariant}
 
   PART_OF:
-    from: [Issue, Task, Repo]
+    from: [Issue, Task, Repo, Observation, Source]  # +Observation/Source: session-history ingest (2026-07-02, etl_history.py)
     to: [Project]
     cardinality: functional
     arity: 1

@@ -16,9 +16,13 @@ CREATE CONSTRAINT capability_key IF NOT EXISTS FOR (n:Capability) REQUIRE n.key 
 CREATE CONSTRAINT agent_key IF NOT EXISTS FOR (n:Agent) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT policy_key IF NOT EXISTS FOR (n:Policy) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT externalsource_key IF NOT EXISTS FOR (n:ExternalSource) REQUIRE n.key IS UNIQUE;
+CREATE CONSTRAINT observation_key IF NOT EXISTS FOR (n:Observation) REQUIRE n.key IS UNIQUE;
+CREATE CONSTRAINT source_key IF NOT EXISTS FOR (n:Source) REQUIRE n.key IS UNIQUE;
 // Governance types (APC-borrowed)
 CREATE CONSTRAINT vote_key IF NOT EXISTS FOR (n:Vote) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT decisionrecord_key IF NOT EXISTS FOR (n:DecisionRecord) REQUIRE n.key IS UNIQUE;
 CREATE CONSTRAINT forceentry_key IF NOT EXISTS FOR (n:ForceEntryCondition) REQUIRE n.key IS UNIQUE;
 // Chunk passages (cf7 — fine-grained retrieval target; key = '<parent_key>#<ord>')
 CREATE CONSTRAINT chunk_key IF NOT EXISTS FOR (c:Chunk) REQUIRE c.key IS UNIQUE;
+// Candidate gate (staging.py — pre-promote low-trust facts; cand_id = sha1(ns|s|rel|o|origin))
+CREATE CONSTRAINT candidate_cand_id IF NOT EXISTS FOR (c:Candidate) REQUIRE c.cand_id IS UNIQUE;

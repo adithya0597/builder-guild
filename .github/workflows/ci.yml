@@ -120,3 +120,15 @@ jobs:
           grep -q RECALL_SELFTEST_OK /tmp/recall.log
           python 01-context/src/retention_sweep.py --selftest | tee /tmp/retention.log
           grep -q RETENTION_SELFTEST_OK /tmp/retention.log
+      - name: staging gate (7mg — candidate-stage + approval gate; promote() writes only through mutate.apply_edge)
+        run: |
+          python 01-context/src/staging.py --selftest | tee /tmp/staging.log
+          grep -q STAGING_OK /tmp/staging.log
+      - name: history ingest gate (22w — hermetic selftest fixtures, needs no engram.db)
+        run: |
+          python 01-context/src/etl_history.py --selftest | tee /tmp/etl_history.log
+          grep -q HISTORY_INGEST_OK /tmp/etl_history.log
+      - name: mcp gate (9fe — read-only stdio MCP surface over serve(); mcp==1.28.1 already in requirements.txt)
+        run: |
+          python 02-agents/src/selftest_mcp.py | tee /tmp/mcp.log
+          grep -q MCP_SERVE_OK /tmp/mcp.log

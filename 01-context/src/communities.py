@@ -12,7 +12,8 @@ SUMMARY_CMD unset => detection-only (communities written, summaries skipped).
 import os
 import sys
 
-NAMESPACES = ["engineering", "product", "finance", "market", "operations", "governance", "shared"]
+NAMESPACES = ["engineering", "product", "finance", "market", "operations", "governance", "shared",
+              "history"]  # session-history ingest ns (2026-07-02); keep in sync with scope.py ROLE_NAMESPACES
 
 # --- Leiden / fallback community detection -----------------------------------
 

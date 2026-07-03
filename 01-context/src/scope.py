@@ -13,9 +13,10 @@ ROLE_NAMESPACES = {
     "operations":  ["operations", "shared"],
     "product":     ["product", "shared"],
     "market":      ["market", "shared"],
+    "history":     ["history", "shared"],
     # governance/audit is the one cross-cutting reader (Dragon Judge) — it may read ALL slices
     # to audit, but that is an EXPLICIT, named exception, not a default.
-    "governance":  ["engineering", "finance", "operations", "product", "market", "governance", "shared"],
+    "governance":  ["engineering", "finance", "operations", "product", "market", "history", "governance", "shared"],
 }
 
 T_CAP = 3   # query-axis: max results returned per source (tune; not proven)
