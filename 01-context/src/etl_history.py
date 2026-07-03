@@ -114,6 +114,21 @@ def _fixture_ledger():
 
 
 # ── ingest (the only writer: mutate.resolve_entity / mutate.apply_edge) ─────
+def _resolve_embeddable(tx, label, key, now, ns, short, long_):
+    """Observation/Source resolve, PLUS content-change detection for the embed-resume filter (698).
+    mutate.resolve_entity's ON-MATCH branch blindly overwrites long_context without touching
+    dirty/content_rev (afh's race-fix: a resolve must never clobber a concurrent mark_dirty) — so a
+    row whose real content changed between two --real runs would go unnoticed by a dirty-only resume
+    filter. Read the PRIOR long_context, resolve, then mark_dirty ONLY if the text actually changed.
+    A fresh create is skipped (old is None) — it has no embedding yet, so the resume filter's
+    `embedding IS NULL` arm already catches it; marking it dirty too would be redundant, not wrong."""
+    old = tx.run("MATCH (n:Entity {key:$key}) RETURN n.long_context AS c", key=key).single()
+    old_long = old["c"] if old else None
+    mutate.resolve_entity(tx, label, key, now, ns, short=short, long_=long_)
+    if old_long is not None and old_long != long_:
+        mutate.mark_dirty(tx, key, now)
+
+
 def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger"):
     """Entities via mutate.resolve_entity (ONE tx — upsert has no reject axis, so it never rolls back
     on a rejected fact). Edges via mutate.apply_edge(PART_OF), ONE TX PER EDGE (mirrors etl.py's
@@ -123,20 +138,21 @@ def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger"):
     Infra errors (neo4j.exceptions.*) are deliberately NOT caught — they propagate and halt, same as
     etl.py. Returns the dead-letter list (empty = every edge applied).
     ZERO LLM. Idempotent: the same rows/ledger/now converges to the identical graph (resolve_entity
-    never bumps content_rev; apply_edge's MERGE re-matches the same current edge instead of duplicating).
+    never bumps content_rev on its own; apply_edge's MERGE re-matches the same current edge instead
+    of duplicating; _resolve_embeddable only flips dirty when text actually differs).
     ledger_prefix keys each Source node as f'{ledger_prefix}:{line-index}' — default 'ledger' matches
     --real's line-index scheme; --selftest passes a distinct prefix so its fixture records can never
     collide with a real ledger:<i> key regardless of run order between --selftest and --real."""
     def _entities(tx):
         for row in rows:
-            mutate.resolve_entity(tx, "Observation", f"obs:{row['id']}", now, ns,
-                                  short=row["title"], long_=f"{row['title']}\n\n{row['content']}")
+            _resolve_embeddable(tx, "Observation", f"obs:{row['id']}", now, ns,
+                                row["title"], f"{row['title']}\n\n{row['content']}")
             pkey = f"project:{canon_project(row['project'])}"
             mutate.resolve_entity(tx, "Project", pkey, now, ns, short=row["project"], long_=row["project"])
         for i, rec in enumerate(ledger):
             short = rec.get("claim") or rec.get("topic") or rec["type"]
-            mutate.resolve_entity(tx, "Source", f"{ledger_prefix}:{i}", now, ns,
-                                  short=short, long_=json.dumps(rec, sort_keys=True))
+            _resolve_embeddable(tx, "Source", f"{ledger_prefix}:{i}", now, ns,
+                                short, json.dumps(rec, sort_keys=True))
             pkey = f"project:{canon_project(rec['run_id'])}"
             mutate.resolve_entity(tx, "Project", pkey, now, ns, short=rec["run_id"], long_=rec["run_id"])
     session.execute_write(_entities)
@@ -158,13 +174,21 @@ def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger"):
     return deadletter
 
 
-def _embed_history_nodes(session, ns, now):
-    """Embed every Observation/Source node in `ns` via embed.embed_node directly. resolve_entity
-    clears dirty ON CREATE only (never sets it), so a freshly created node never lands in
-    sweep.py's dirty queue — embed it directly rather than round-tripping mark_dirty + sweep_once."""
+def _embed_history_nodes(session, ns, now, reembed_all=False):
+    """Embed Observation/Source nodes in `ns` via embed.embed_node directly. resolve_entity clears
+    dirty ON CREATE only (never sets it), so a freshly created node never lands in sweep.py's dirty
+    queue — embed it directly rather than round-tripping mark_dirty + sweep_once.
+
+    Resume filter (698, default): only nodes with no embedding yet OR flagged dirty — mirrors
+    sweep.sweep_once's `n.dirty=true` selection, plus `embedding IS NULL` for first-time nodes
+    (which are never dirty, per the comment above). dirty is now accurate for content edits too:
+    _resolve_embeddable (in ingest()) sets it when a row's text actually changes between runs.
+    --reembed-all bypasses the filter entirely — use after an embedding-model swap or a chunking/
+    text-format change, where every existing vector is stale but embedding/dirty say otherwise."""
     import embed
+    resume = "" if reembed_all else " AND (n.embedding IS NULL OR n.dirty=true)"
     rows = session.execute_read(lambda tx: tx.run(
-        "MATCH (n:Entity) WHERE n.namespace=$ns AND (n:Observation OR n:Source) "
+        f"MATCH (n:Entity) WHERE n.namespace=$ns AND (n:Observation OR n:Source){resume} "
         "RETURN n.key AS k, n.long_context AS c", ns=ns).data())
     for r in rows:
         session.execute_write(lambda tx, r=r: embed.embed_node(tx, r["k"], r["c"], "prose", now))
@@ -209,6 +233,22 @@ def _selftest():
             print(f"[canon]      project:my-portfolio node count={n_proj} "
                   f"(expect 1, from 'My-Portfolio' + 'my-portfolio')")
             fail += [] if n_proj == 1 else [f"canon_project did not collapse casing variants: {n_proj} nodes"]
+
+            # FIX 698: the embed-resume filter trusts dirty to be accurate for content edits, not just
+            # sweep.mark_dirty calls. An identical re-ingest (dl2 above) must NOT flip it (no false
+            # positive -> no needless re-embed); a REAL content edit on the same key MUST flip it (else
+            # the resume filter would silently skip a changed node forever).
+            dirty_noop = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'obs:fx1'}) RETURN n.dirty AS d").single()["d"])
+            edited = [dict(rows[0], content="Fixture content one, EDITED."), rows[1]]
+            ingest(s, edited, ledger, T1, TNS, ledger_prefix="ledgerfx")
+            dirty_edit = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'obs:fx1'}) RETURN n.dirty AS d").single()["d"])
+            print(f"[dirty]      obs:fx1 dirty: after identical re-ingest={dirty_noop} "
+                  f"-> after real content edit={dirty_edit}")
+            fail += [] if dirty_noop is False else ["identical re-ingest false-positived dirty=true"]
+            fail += [] if dirty_edit is True else \
+                ["content edit did not mark dirty — embed-resume filter would silently skip it"]
 
             # FIX bc7/22w: a row's project reclassified between runs while its subject already has a
             # current PART_OF elsewhere -> arity:1 overflow:reject collision. Must dead-letter THAT
@@ -255,6 +295,7 @@ def _real():
     fail = []
     now = datetime.now(timezone.utc).strftime(NOW_FMT)
     ns = "history"
+    reembed_all = "--reembed-all" in sys.argv
 
     rows = _real_engram_rows()
     ledger = _real_ledger_records()
@@ -264,7 +305,7 @@ def _real():
         drv.verify_connectivity()
         with drv.session() as s:
             ingest(s, rows, ledger, now, ns)
-            n_embedded = _embed_history_nodes(s, ns, now)
+            n_embedded = _embed_history_nodes(s, ns, now, reembed_all=reembed_all)
             counts = s.execute_read(lambda tx: tx.run(
                 "MATCH (n:Entity) WHERE n.namespace=$ns RETURN labels(n) AS labels", ns=ns).data())
             n_edges = s.execute_read(lambda tx: tx.run(
@@ -274,7 +315,8 @@ def _real():
     n_obs = sum(1 for c in counts if "Observation" in c["labels"])
     n_src = sum(1 for c in counts if "Source" in c["labels"])
     n_proj = sum(1 for c in counts if "Project" in c["labels"])
-    print(f"[embed]  embedded {n_embedded} Observation/Source nodes in ns={ns}")
+    print(f"[embed]  embedded {n_embedded} Observation/Source nodes in ns={ns} "
+          f"(mode={'reembed-all' if reembed_all else 'resume'})")
     print(f"[counts] history ns nodes: Observation={n_obs} Source={n_src} Project={n_proj} "
           f"total={len(counts)} | current PART_OF edges={n_edges}")
 
@@ -314,7 +356,11 @@ def main():
     elif "--real" in sys.argv:
         _real()
     else:
-        print("usage: etl_history.py --selftest | --real"); sys.exit(2)
+        print("usage: etl_history.py --selftest | --real [--reembed-all]\n"
+              "  --reembed-all: force full re-embed of every Observation/Source node (default: "
+              "resume — only nodes with no embedding yet or flagged dirty). Use after an "
+              "embedding-model swap or a chunking/text-format change.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
