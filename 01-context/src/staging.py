@@ -45,27 +45,34 @@ def _cand_id(ns, s_key, rel, o_key, origin):
     return hashlib.sha1(payload.encode()).hexdigest()
 
 
-def stage(session, s_key, rel, o_key, ns, origin, now, ep=None):
+def stage(session, s_key, rel, o_key, ns, origin, now, ep=None, evidence=None, source=None):
     """Stage ONE candidate as a :Candidate node (no edge, no :Entity). status/staged_at are set
     ON CREATE only -> a re-stage of the same (ns,s,rel,o,origin) is idempotent and never resets an
-    already-reviewed candidate. Returns the deterministic cand_id."""
+    already-reviewed candidate. evidence/source are optional review-surface metadata (rationale text
+    + a source ref); None -> the Cypher SET writes null, which removes the property (same idiom as
+    ep). Returns the deterministic cand_id."""
     cid = _cand_id(ns, s_key, rel, o_key, origin)
     session.execute_write(lambda tx: tx.run(
         "MERGE (c:Candidate {cand_id:$id}) "
         "ON CREATE SET c.status='pending', c.s_key=$s, c.rel=$rel, c.o_key=$o, "
-        "              c.namespace=$ns, c.origin=$origin, c.ep=$ep, c.staged_at=datetime($now)",
-        id=cid, s=s_key, rel=rel, o=o_key, ns=ns, origin=origin, ep=ep, now=now))
+        "              c.namespace=$ns, c.origin=$origin, c.ep=$ep, c.staged_at=datetime($now), "
+        "              c.evidence=$evidence, c.source=$source",
+        id=cid, s=s_key, rel=rel, o=o_key, ns=ns, origin=origin, ep=ep, now=now,
+        evidence=evidence, source=source))
     return cid
 
 
 def stage_llm(session, edges, now):
     """The origin='llm' ingest entrypoint that can ONLY stage. Takes pre-built edge tuples
-    (s_key, rel, o_key, ns) or (s_key, rel, o_key, ns, ep) and loops stage(..., origin='llm').
-    Holds NO reference to mutate.apply_edge -> structurally unable to direct-write an edge."""
+    (s_key, rel, o_key, ns), (s_key, rel, o_key, ns, ep), or (s_key, rel, o_key, ns, ep, evidence,
+    source) and loops stage(..., origin='llm'). Holds NO reference to mutate.apply_edge ->
+    structurally unable to direct-write an edge."""
     ids = []
     for e in edges:
         ep = e[4] if len(e) > 4 else None
-        ids.append(stage(session, e[0], e[1], e[2], e[3], "llm", now, ep))
+        evidence = e[5] if len(e) > 5 else None
+        source = e[6] if len(e) > 6 else None
+        ids.append(stage(session, e[0], e[1], e[2], e[3], "llm", now, ep, evidence, source))
     return ids
 
 
@@ -95,7 +102,9 @@ def reject(session, cand_id, reason, now):
     """pending/approved -> rejected (records review_reason + reviewed_at). Raises ValueError (naming
     the id and required status, mirroring promote()'s guard) when cand_id is missing or not
     pending/approved. Never touches the graph — a :Candidate property write only, leaving an
-    auditable rejected record."""
+    auditable rejected record. CAVEAT (builder-guild-gtb): this write carries no status CAS, so a
+    reject racing a concurrent promote() can land AFTER the promote committed its edge — leaving
+    status='rejected' with the edge still live until lifecycle CAS hardening lands."""
     def _work(tx):
         c = _get(tx, cand_id)
         if c is None:
@@ -131,6 +140,12 @@ def promote(session, cand_id, now):
     'approved', not 'promoted' over a fact that was silently never written.
     Idempotent: an already-'promoted' candidate is a no-op (returns False); otherwise returns True."""
     def _work(tx):
+        # FIX-RACE (builder-guild-485): lock the Candidate node itself before reading it, so two
+        # concurrent promote() calls on the SAME cand_id serialize HERE regardless of the staged
+        # relation's arity. apply_edge's own subject _wlock (mutate.py `if functional and lock:`)
+        # only fires for arity:1 relations — an arity:inf candidate (BLOCKS, OWNS, RELATED_TO, ...)
+        # would otherwise race straight through to the CAS below with no serialization at all.
+        tx.run("MATCH (c:Candidate {cand_id:$id}) SET c._plock=$now", id=cand_id, now=now)
         c = _get(tx, cand_id)
         if c is None:
             raise ValueError(f"promote: no candidate {cand_id}")
@@ -152,8 +167,13 @@ def promote(session, cand_id, now):
         if mutate.edge_state(tx, c["s_key"], c["rel"], c["o_key"], c["namespace"]) is not True:
             raise ValueError(f"promote: edge {c['s_key']} -{c['rel']}-> {c['o_key']} did not "
                               f"materialize (endpoint not a resolved :Entity?) — stays 'approved'")
-        tx.run("MATCH (c:Candidate {cand_id:$id}) "
-               "SET c.status='promoted', c.promoted_at=datetime($now)", id=cand_id, now=now)
+        won = tx.run("MATCH (c:Candidate {cand_id:$id, status:'approved'}) "
+                     "SET c.status='promoted', c.promoted_at=datetime($now) "
+                     "RETURN c.cand_id AS id", id=cand_id, now=now).single()
+        if won is None:
+            raise ValueError(
+                f"promote: lost status race — candidate {cand_id} no longer 'approved' "
+                f"(concurrent promote/reject won); nothing written")
         return True
     return session.execute_write(_work)
 
@@ -164,7 +184,8 @@ def list_candidates(session, status=None):
         q = ("MATCH (c:Candidate) " + ("WHERE c.status=$status " if status else "") +
              "RETURN c.cand_id AS cand_id, c.status AS status, c.s_key AS s_key, c.rel AS rel, "
              "       c.o_key AS o_key, c.namespace AS namespace, c.origin AS origin, "
-             "       c.staged_at AS staged_at, c.review_reason AS review_reason ORDER BY c.cand_id")
+             "       c.staged_at AS staged_at, c.review_reason AS review_reason, "
+             "       c.evidence AS evidence, c.source AS source ORDER BY c.cand_id")
         return [dict(r) for r in tx.run(q, status=status)]
     return session.execute_read(_read)
 
@@ -219,7 +240,7 @@ def _selftest():
                 s.execute_write(lambda tx: mutate.resolve_entity(tx, "Issue", SUBJ, S0, SNS, short=SUBJ, long_=SUBJ, ep="stg-ep"))
 
                 # (a) stage an edge SUBJ -ASSIGNED_TO-> OBJ; it must be invisible to every read while pending
-                c1 = stage(s, SUBJ, REL, OBJ, SNS, "human", S0)
+                c1 = stage(s, SUBJ, REL, OBJ, SNS, "human", S0, evidence="stg-evidence", source="stg-source")
                 exists = s.execute_read(lambda tx: tx.run(
                     "MATCH (c:Candidate {cand_id:$id}) RETURN count(c) AS c", id=c1).single()["c"])
                 card, facts = s.execute_read(lambda tx: etl.node_card(tx, SUBJ, allowed))
@@ -230,8 +251,16 @@ def _selftest():
                 fail += [] if (facts == [] and cnt == 0) else [("pending visible to node_card/direct count", facts, cnt)]
                 fail += [] if (kw == [] and gr == []) else [("pending visible to ladder rungs (kw,gr)", kw, gr)]
 
+                # (a)/(d)-WITH: evidence/source persisted on stage
+                c1_staged = s.execute_read(lambda tx: _get(tx, c1))
+                fail += [] if (c1_staged["evidence"] == "stg-evidence" and c1_staged["source"] == "stg-source") \
+                    else [("stage did not persist evidence/source", c1_staged.get("evidence"), c1_staged.get("source"))]
+
                 # (b) approve -> seed object -> promote; edge is now current and went THROUGH apply_edge
                 approve(s, c1, S1)
+                c1_after_approve = s.execute_read(lambda tx: _get(tx, c1))
+                fail += [] if (c1_after_approve["evidence"] == "stg-evidence" and c1_after_approve["source"] == "stg-source") \
+                    else [("approve altered evidence/source", c1_after_approve.get("evidence"), c1_after_approve.get("source"))]
                 s.execute_write(lambda tx: mutate.resolve_entity(tx, "Agent", OBJ, S1, SNS, short=OBJ, long_=OBJ, ep="stg-ep"))
                 did1 = promote(s, c1, S2)
                 st = s.execute_read(lambda tx: mutate.edge_state(tx, SUBJ, REL, OBJ, SNS))
@@ -242,6 +271,17 @@ def _selftest():
                 fail += [] if (did1 is True and st is True and tg == [OBJ] and gr2 == [SUBJ]
                                and kw2 == [OBJ] and (REL + " -> " + OBJ) in facts_p) \
                     else [("promote did not materialize edge through apply_edge", did1, st, tg, gr2, kw2, facts_p)]
+
+                # (a)/(d)-WITH: promote leaves candidate evidence/source unchanged and never writes them onto the edge
+                c1_after_promote = s.execute_read(lambda tx: _get(tx, c1))
+                fail += [] if (c1_after_promote["evidence"] == "stg-evidence" and c1_after_promote["source"] == "stg-source") \
+                    else [("promote altered candidate evidence/source", c1_after_promote.get("evidence"), c1_after_promote.get("source"))]
+                edge_props = s.execute_read(lambda tx: tx.run(
+                    "MATCH (:Entity {key:$s})-[r:RELATES_TO {name:$rel}]->(:Entity {key:$o}) "
+                    "WHERE r.invalid_at > datetime() RETURN properties(r) AS p",
+                    s=SUBJ, rel=REL, o=OBJ).single()["p"])
+                fail += [] if ("evidence" not in edge_props and "source" not in edge_props) \
+                    else [("promote leaked evidence/source onto the graph edge", edge_props)]
 
                 # (d) re-promote an already-promoted candidate = no-op, current stays length 1 (idempotent)
                 did2 = promote(s, c1, S3)
@@ -255,6 +295,9 @@ def _selftest():
                 # pre-existing SUBJ->OBJ current edge untouched (whole-tx rollback).
                 OBJ4 = "agent:STG-DAVE"
                 c3 = stage(s, SUBJ, REL, OBJ4, SNS, "human", S1)
+                c3_staged = s.execute_read(lambda tx: _get(tx, c3))
+                fail += [] if (c3_staged.get("evidence") is None and c3_staged.get("source") is None) \
+                    else [("stage without evidence/source persisted a value", c3_staged.get("evidence"), c3_staged.get("source"))]
                 approve(s, c3, S2)
                 try:
                     promote(s, c3, S3)
@@ -274,6 +317,24 @@ def _selftest():
                 st3 = s.execute_read(lambda tx: mutate.edge_state(tx, SUBJ, REL, OBJ4, SNS))
                 fail += [] if (did3 is True and st3 is True) \
                     else [("promote did not succeed once the object was materialized", did3, st3)]
+
+                # (a)/(d)-WITHOUT: evidence/source stay absent through the approve -> promote(fails) ->
+                # materialize -> promote(succeeds) retry path
+                c3_final = s.execute_read(lambda tx: _get(tx, c3))
+                fail += [] if (c3_final.get("evidence") is None and c3_final.get("source") is None) \
+                    else [("evidence/source appeared on a no-evidence candidate", c3_final.get("evidence"), c3_final.get("source"))]
+
+                # (b) list_candidates()/_fmt_candidate() surface evidence/source when present, clean when absent
+                lc = list_candidates(s)
+                lc1 = next(c for c in lc if c["cand_id"] == c1)
+                lc3 = next(c for c in lc if c["cand_id"] == c3)
+                fail += [] if (lc1["evidence"] == "stg-evidence" and lc1["source"] == "stg-source") \
+                    else [("list_candidates lost evidence/source for c1", lc1.get("evidence"), lc1.get("source"))]
+                fail += [] if (lc3["evidence"] is None and lc3["source"] is None) \
+                    else [("list_candidates fabricated evidence/source for c3", lc3.get("evidence"), lc3.get("source"))]
+                fmt1, fmt3 = _fmt_candidate(lc1), _fmt_candidate(lc3)
+                fail += [] if "evidence=" in fmt1 else [("_fmt_candidate missing evidence= for c1", fmt1)]
+                fail += [] if "evidence=" not in fmt3 else [("_fmt_candidate showed evidence= for evidence-less c3", fmt3)]
 
                 # (g) promote must REFUSE a cross-namespace splice: OBJ5 is a real, resolved :Entity —
                 # just owned by a DIFFERENT namespace (SNS_B) than the candidate (SNS). apply_edge's
@@ -320,13 +381,18 @@ def _selftest():
 
                 # directive: stage_llm stages ONLY :Candidate origin='llm' and creates ZERO edges
                 before = s.execute_read(_total_rel)
-                llm_ids = stage_llm(s, [(SUBJ, REL, OBJ3, SNS)], S1)
+                llm_ids = stage_llm(s, [(SUBJ, REL, OBJ3, SNS, None, "stg-evidence-llm", "stg-source-llm")], S1)
                 after = s.execute_read(_total_rel)
                 origin = s.execute_read(lambda tx: tx.run(
                     "MATCH (c:Candidate {cand_id:$id}) RETURN c.origin AS o", id=llm_ids[0]).single()["o"])
                 leaked = s.execute_read(lambda tx: ladder.keyword_rung(tx, allowed, OBJ3))   # no :Entity created
                 fail += [] if (after == before and origin == "llm" and leaked == []) \
                     else [("stage_llm created an edge/entity or mis-tagged origin", before, after, origin, leaked)]
+
+                # (a) stage_llm: 7-tuple with an ep hole (None) still lands evidence/source correctly
+                llm_staged = s.execute_read(lambda tx: _get(tx, llm_ids[0]))
+                fail += [] if (llm_staged.get("evidence") == "stg-evidence-llm" and llm_staged.get("source") == "stg-source-llm") \
+                    else [("stage_llm 7-tuple did not persist evidence/source", llm_staged.get("evidence"), llm_staged.get("source"))]
 
                 # (i) approve()/reject() must RAISE (not silently no-op) when the target candidate is
                 # missing or not in a valid status — an operator must never see "approved: <id>" or
@@ -375,6 +441,12 @@ def _fmt_candidate(c):
         extra += f"  staged={c['staged_at']}"
     if c.get("review_reason"):
         extra += f"  reason={c['review_reason']}"
+    # evidence/source are LLM-origin (low-trust) text rendered at the reviewer's trust-decision
+    # moment — repr() them so ANSI/OSC escapes can't spoof the terminal line being reviewed.
+    if c.get("evidence"):
+        extra += f"  evidence={c['evidence']!r}"
+    if c.get("source"):
+        extra += f"  source={c['source']!r}"
     return (f"{c['cand_id'][:12]}  {c['status']:<9} ns={c['namespace']:<12} "
             f"{c['s_key']} -{c['rel']}-> {c['o_key']}  origin={c['origin']}{extra}")
 

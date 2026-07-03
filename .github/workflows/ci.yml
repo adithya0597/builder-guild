@@ -124,6 +124,12 @@ jobs:
         run: |
           python 01-context/src/staging.py --selftest | tee /tmp/staging.log
           grep -q STAGING_OK /tmp/staging.log
+      - name: race gates (485 — promote() CAS under concurrency + sibling apply_edge write-lock gate)
+        run: |
+          python 01-context/src/race_test.py | tee /tmp/race.log
+          grep -q FIX_RACE_OK /tmp/race.log
+          python 01-context/src/staging_race_test.py | tee /tmp/staging_race.log
+          grep -q STAGING_RACE_OK /tmp/staging_race.log
       - name: history ingest gate (22w — hermetic selftest fixtures, needs no engram.db)
         run: |
           python 01-context/src/etl_history.py --selftest | tee /tmp/etl_history.log
