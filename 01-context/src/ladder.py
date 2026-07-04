@@ -25,13 +25,17 @@ def keyword_rung(s, allowed, text):
                   if r["k"].lower() in toks or r["k"].split(":", 1)[-1].lower() in toks)
 
 
-def graph_rung(s, allowed, pattern):  # instant structural MATCH, role-scoped, current only
+def graph_rung(s, allowed, pattern, as_of=None):  # instant structural MATCH, role-scoped; as_of=None => current
     # namespace-scope ALL three: subject, edge AND object (object filter was the codex leak #3).
+    # as_of is a retrieval FILTER here (not reconcile-fed) so the both-sided validity window is a HARD
+    # filter — mirrors NODE_CARD (serve.py:25-26); as_of=None coalesces to now == the old current-only rule.
     q = ("MATCH (i:Entity)-[r:RELATES_TO]->(o:Entity) "
          "WHERE i.namespace IN $allowed AND r.namespace IN $allowed AND o.namespace IN $allowed "
-         "  AND r.name=$rel AND o.key=$obj AND r.invalid_at > datetime() "
+         "  AND r.name=$rel AND o.key=$obj "
+         "  AND r.valid_at <= coalesce(datetime($as_of), datetime()) "
+         "  AND r.invalid_at > coalesce(datetime($as_of), datetime()) "
          "RETURN i.key AS hit ORDER BY hit")
-    return [rec["hit"] for rec in s.run(q, allowed=allowed, rel=pattern["rel"], obj=pattern["obj"])]
+    return [rec["hit"] for rec in s.run(q, allowed=allowed, rel=pattern["rel"], obj=pattern["obj"], as_of=as_of)]
 
 
 def vector_available(s):
@@ -201,6 +205,21 @@ def demo():
                    and all(ns in ("finance", "shared") for _, ns, _ in fin_hits)) \
         else ["finance vector rung leaked an out-of-slice node OR returned nothing (vacuous isolation)"]
     print(f"[isolate] ACME-2 (engineering) in finance results? {'issue:ACME-2' in fin_keys} (must be False)")
+
+    # run-4 (builder-guild-w14): graph_rung's new as_of=None default is byte-identical to the pre-change
+    # current-only filter (a seeded CURRENT edge still returns), and the temporal filter is genuinely
+    # engaged (a past as_of, before the edge's valid_at, returns nothing). Read-only; reuses the seed's
+    # issue:ACME-2 -BLOCKS-> issue:ACME-1 current edge (same fixture the assertions above rely on).
+    allowed = scope("engineering")["allowed"]
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        now_hits = graph_rung(s, allowed, {"rel": "BLOCKS", "obj": "issue:ACME-1"})
+        past_hits = graph_rung(s, allowed, {"rel": "BLOCKS", "obj": "issue:ACME-1"},
+                               as_of="2000-01-01T00:00:00Z")
+    print(f"[graph]  BLOCKS->ACME-1 as_of=None={now_hits} | past(2000)={past_hits}")
+    fail += [] if "issue:ACME-2" in now_hits \
+        else ["run-4: graph_rung as_of=None dropped a current seeded hit (not byte-identical)"]
+    fail += [] if past_hits == [] \
+        else ["run-4: graph_rung past as_of returned a not-yet-valid edge (temporal filter not engaged)"]
 
     if fail:
         print("INT2_FAIL:", fail); sys.exit(1)

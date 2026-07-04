@@ -25,7 +25,9 @@ OPTIONAL MATCH (i)-[r:RELATES_TO]->(o:Entity)
 RETURN coalesce(i.dirty,false) AS node_dirty,
   [x IN collect(CASE WHEN r IS NULL THEN NULL ELSE {
      fact: r.name + ' -> ' + o.key,
-     validity: CASE WHEN r.invalid_at > datetime() THEN 'current' ELSE 'historical' END
+     validity: CASE WHEN r.valid_at <= coalesce(datetime($as_of), datetime())
+                     AND r.invalid_at > coalesce(datetime($as_of), datetime())
+                THEN 'current' ELSE 'historical' END
    } END) WHERE x IS NOT NULL] AS facts
 """
 
@@ -50,10 +52,25 @@ def action_gate(fact):
     return "ALLOW", "current+fresh"
 
 
-def card(key, allowed):
+def card(key, allowed, as_of=None):
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
-        rec = s.run(CARD_Q, key=key, allowed=allowed).single()
+        rec = s.run(CARD_Q, key=key, allowed=allowed, as_of=as_of).single()
         return stamp_card(rec) if rec else []
+
+
+def plant_supersession(subj, rel, old_obj, new_obj, ns, t0, t1):
+    """Test fixture: plant a bi-temporal supersession — subj -[rel]-> old_obj @t0, superseded by
+    subj -[rel]-> new_obj @t1 — through the SANCTIONED mutate engine (the write-gateway forbids
+    hand-written current RELATES_TO edges, and serve.py may not import mutate — CALL_ALLOWLIST).
+    Idempotent start; the CALLER cleans up by key with a raw DETACH DELETE."""
+    from mutate import resolve_entity, apply_edge
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[subj, old_obj, new_obj])
+        s.execute_write(lambda tx: resolve_entity(tx, "Issue", subj, t0, ns, short=subj, long_=subj))
+        for o in (old_obj, new_obj):
+            s.execute_write(lambda tx, o=o: resolve_entity(tx, "StatusValue", o, t0, ns, short=o, long_=o))
+        s.execute_write(lambda tx: apply_edge(tx, subj, rel, old_obj, t0, ns, "asof-ep0"))
+        s.execute_write(lambda tx: apply_edge(tx, subj, rel, new_obj, t1, ns, "asof-ep1"))  # supersede old
 
 
 # ── demo / acceptance (isolated, self-cleaning) ──────────────────────────────
@@ -83,8 +100,8 @@ def demo():
             s.execute_write(lambda tx: resolve_entity(tx, "Issue", "st:leak", T0, "other_ns", short="leak", long_="leak"))
             s.execute_write(lambda tx: apply_edge(tx, "st:s1", "BLOCKS", "st:leak", T0, NS, "e1"))
 
-            s1 = stamp_card(s.run(CARD_Q, key="st:s1", allowed=[NS]).single())
-            s2 = stamp_card(s.run(CARD_Q, key="st:s2", allowed=[NS]).single())
+            s1 = stamp_card(s.run(CARD_Q, key="st:s1", allowed=[NS], as_of=None).single())
+            s2 = stamp_card(s.run(CARD_Q, key="st:s2", allowed=[NS], as_of=None).single())
             leaked = [f for f in s1 if "st:leak" in f["fact"]]
             print(f"[isolation] out-of-scope target st:leak in card? {bool(leaked)} (must be False)")
             fail += [] if not leaked else ["READ-SIDE LEAK: out-of-namespace target surfaced in card"]
@@ -99,6 +116,15 @@ def demo():
 
     # every fact stamped on both axes
     fail += [] if all({"validity", "fresh"} <= set(f) for f in s1 + s2) else ["unstamped fact"]
+
+    # run-4 (builder-guild-w14): CARD_Q must PRESERVE the superseded bucket at as_of=None — it is NOT a
+    # WHERE hard-filter. s1 carries HAS_STATUS -> st:open (superseded by -> st:closed @T1); at as_of=None
+    # that edge MUST still return as a 'historical' fact (a hard-filter would drop it and zero
+    # reconcile.n_superseded downstream — the two-bucket provenance guard).
+    hist = [f for f in s1 if f["validity"] == "historical"]
+    print(f"[as_of]  s1 historical facts (superseded, must be >=1): {[f['fact'] for f in hist]}")
+    fail += [] if (len(hist) >= 1 and any("st:open" in f["fact"] for f in hist)) \
+        else ["run-4: CARD_Q dropped the superseded bucket at as_of=None (converted to a WHERE hard-filter?)"]
 
     # freshness judge drops superseded
     kept = freshness_judge(s1)

@@ -128,7 +128,7 @@ def _host_freshness(s, key, allowed):
 
 
 def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=False,
-          include_communities=False):
+          include_communities=False, as_of=None):
     """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
     serve-join (deep PageIndex escalation, OPT-IN) -> gate+abstain -> execute.
@@ -165,7 +165,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
         # 1. RETRIEVE — keyword (exact-ID) + graph (structural) + vector (recall), all namespace-scoped
         kw_hits = ladder.keyword_rung(s, allowed, query_text) if query_text else []
-        graph_hits = ladder.graph_rung(s, allowed, pattern) if pattern else []
+        graph_hits = ladder.graph_rung(s, allowed, pattern, as_of=as_of) if pattern else []
         vec_hits = ladder.vector_rung(s, allowed, query_text, k) if query_text else []
         vec_keys = [h["key"] for h in vec_hits]
         # cf7 rung 2b — chunk-level vector recall ("which passage"). Returns parent keys (for fusion) +
@@ -253,7 +253,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         trace["epist"] = {"primary_source": sources[primary], "authority": "keyword=graph>vector>chunk"}
 
         # 4. STAMP + 5. RECONCILE — the primary node's card (o.namespace-isolated)
-        rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed).single()
+        rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed, as_of=as_of).single()
         facts = stamp.stamp_card(rec)
         node_fresh = "stale" if rec["node_dirty"] else "fresh"
         card = reconcile.reconcile(node_fresh, facts, FUNCTIONAL_RELS)
@@ -269,7 +269,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         composed = []
         expand = []                                  # 1-hop: in-scope targets of presented facts
         def _add_card(kk):
-            crec = s.run(stamp.CARD_Q, key=kk, allowed=allowed).single()
+            crec = s.run(stamp.CARD_Q, key=kk, allowed=allowed, as_of=as_of).single()
             if crec is None:
                 return
             # 3zy: tag BOTH presentation surfaces with the PARENT's live freshness ([fresh]/[stale])
@@ -637,6 +637,36 @@ def _demo():
           f"(no stale claim: NOT the faithfulness hard-gate)")
     fail += [] if f_via == "sufficiency×confidence" \
         else [f"(ii) fresh-host control should route via sufficiency×confidence, got via={f_via}"]
+
+    # ── TEMPORAL as_of (run-4 / builder-guild-w14): planted supersession, 3 timepoints + n_superseded
+    # guard. serve.py is NOT in the write-gateway CALL_ALLOWLIST for the write engine, so the chain is
+    # planted via stamp.plant_supersession (stamp.py IS allowlisted); cleanup is a raw DETACH DELETE.
+    import stamp
+    A_ISS, A_OLD, A_NEW = "issue:asofprobe", "status:asofprobe-old", "status:asofprobe-new"
+    A_NS = "engineering"                                        # engineering role can read this slice
+    T0, TB, T1, TA = ("2026-06-04T00:00:00Z", "2026-06-04T00:30:00Z",
+                      "2026-06-04T01:00:00Z", "2026-06-04T02:00:00Z")   # T0 < TB < T1 < TA < now
+    old_fact, new_fact = f"HAS_STATUS -> {A_OLD}", f"HAS_STATUS -> {A_NEW}"
+    stamp.plant_supersession(A_ISS, "HAS_STATUS", A_OLD, A_NEW, A_NS, T0, T1)
+    try:
+        r_before = serve("asofprobe", "engineering", as_of=TB)   # T0 <= TB < T1  -> OLD is current
+        r_now    = serve("asofprobe", "engineering")             # as_of=None -> now (> T1) -> NEW current
+        r_after  = serve("asofprobe", "engineering", as_of=TA)   # TA > T1        -> NEW is current
+        pf_b, pf_n, pf_a = (r_before["presentable_facts"], r_now["presentable_facts"],
+                            r_after["presentable_facts"])
+        nsup = r_now["trace"]["stamp_reconcile"]["n_superseded"]
+        print(f"[as_of]  primary={r_now['primary']} T_before={pf_b} now={pf_n} T_after={pf_a} "
+              f"n_superseded@None={nsup}")
+        fail += [] if (r_before["primary"] == A_ISS and old_fact in pf_b and new_fact not in pf_b) \
+            else [f"(as_of) T_before must surface OLD value only: primary={r_before['primary']} pf={pf_b}"]
+        fail += [] if (new_fact in pf_n and old_fact not in pf_n) \
+            else [f"(as_of) as_of=None must surface NEW value only: pf={pf_n}"]
+        fail += [] if new_fact in pf_a else [f"(as_of) T_after must surface NEW value: pf={pf_a}"]
+        fail += [] if nsup >= 1 \
+            else [f"(as_of) n_superseded must be >=1 at as_of=None (CARD_Q hard-filtered?): {nsup}"]
+    finally:
+        with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+            s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[A_ISS, A_OLD, A_NEW])
 
     if fail:
         print("INT3_FAIL(serve-join):", fail); sys.exit(1)

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/history-refresh.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
