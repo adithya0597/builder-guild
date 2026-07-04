@@ -7,8 +7,7 @@ invoked over TRIALS fresh candidates for 4 pairings:
   1. promote  vs promote   (GATES STAGING_RACE_OK — clause a)
   2. approve  vs reject    (GATES — clause b)
   3. approve  vs approve   (informational — extra coverage)
-  4. promote  vs reject    (informational — known "phantom edge" risk, tracked separately as
-                            bead builder-guild-gtb; see builder-guild-485-plan-v2.md §6)
+  4. promote  vs reject    (GATES — gtb-plan-v3 clause d, phantom-edge race closed)
 
 Namespace "staging_race_test" is disjoint from race_test.py's "race_test" and staging.py's
 "_staging_selftest" — 3 sibling gates, 3 disjoint namespaces, safe to run concurrently.
@@ -212,10 +211,13 @@ def main():
             print(f"[s1 promote-vs-promote]  sum(returns) distribution over {TRIALS} trials: {sums}  "
                   f"loser-raised-'lost status race': {lost_race}/{TRIALS}")
 
-            # scenario 2: approve vs reject — GATES clause (b). Convergence-only (clause b's bar);
-            # approve/reject carry no CAS today, so BOTH threads can return without exception (both
-            # operators told they "won") — reported, not gated (CAS hardening there is
-            # builder-guild-gtb scope, not this bead's).
+            # scenario 2: approve vs reject — GATES gtb-plan-v3 clause (c). Lifecycle CAS
+            # (builder-guild-gtb) makes reject dominate: its source set {pending, approved} is a
+            # superset that includes approve's own outcome state, so reject now succeeds regardless
+            # of ordering — final status is always 'rejected' and reject() never raises. Both
+            # threads returning without exception is LEGAL (approve-then-reject legally serializes,
+            # no lost update); do NOT assert sum(successes)==1 — both_succeeded stays tallied/
+            # printed only, never gated.
             statuses, edges_seen, both_succeeded = {}, {}, 0
             for trial in range(TRIALS):
                 results, errors, status, edges = scenario_approve_reject(drv, trial)
@@ -223,8 +225,8 @@ def main():
                 _tally(edges_seen, edges)
                 if errors[0] is None and errors[1] is None:
                     both_succeeded += 1
-                if status not in ("approved", "rejected"):
-                    fail.append(("s2 non-terminal status", trial, status))
+                if status != "rejected":
+                    fail.append(("s2 final status != rejected", trial, status))
                 if edges != 0:
                     fail.append(("s2 graph write leaked", trial, edges))
                 if errors[0] is not None and not isinstance(errors[0], ValueError):
@@ -242,22 +244,27 @@ def main():
                 errs3 += [e for e in errors if e]
             print(f"[info] s3 approve-vs-approve status distribution: {statuses3}  errors={errs3}")
 
-            # scenario 4: promote vs reject — informational only. Post-CAS-fix, promote() losing
-            # the race now raises+rolls-back (writes nothing), so edge-count should trend toward 0
-            # when reject wins. RESIDUAL phantom-edge path (builder-guild-gtb, NOT fixed by this
-            # bead): promote's CAS commits FIRST (status='promoted', edge written), but reject()'s
-            # own write is an unconditional MATCH-by-cand_id with no status re-check AT WRITE TIME
-            # (only at its earlier read) — a reject() whose READ happened before promote's commit
-            # can still land its SET afterward, flipping status to 'rejected' while promote's
-            # already-committed edge survives untouched -> a 'rejected' candidate with a live edge.
+            # scenario 4: promote vs reject — GATES gtb-plan-v3 clause (d). Lifecycle CAS
+            # (builder-guild-gtb) closes the phantom-edge race: promote's source is {approved} only
+            # and reject's excludes 'promoted', so whichever fresh-reads second sees the other's
+            # already-committed status and raises before writing anything — exactly one side
+            # succeeds, the loser raises ValueError, and ('rejected', edges>=1) is unreachable.
             statuses4, edges4, errs4 = {}, {}, []
             for trial in range(TRIALS):
                 results, errors, status, edges = scenario_promote_reject(drv, trial)
                 _tally(statuses4, status)
                 _tally(edges4, edges)
                 errs4 += [e for e in errors if e]
-            print(f"[info] s4 promote-vs-reject status distribution: {statuses4}  current-edge-count: {edges4}  "
-                  f"errors={errs4}  (phantom-edge risk tracked separately, see builder-guild-gtb)")
+                if (status, edges) not in (("promoted", 1), ("rejected", 0)):
+                    fail.append(("s4 phantom edge", trial, status, edges))
+                succeeded = sum(1 for e in errors if e is None)
+                if succeeded != 1:
+                    fail.append(("s4 not exactly-one-succeeded", trial, results, errors))
+                for e in errors:
+                    if e is not None and not isinstance(e, ValueError):
+                        fail.append(("s4 loser raised non-ValueError", trial, e))
+            print(f"[s4 promote-vs-reject]  status distribution over {TRIALS} trials: {statuses4}  "
+                  f"current-edge-count: {edges4}  errors={errs4}")
 
             # scenario 5: promote vs promote over RELATED_TO (arity:inf) — GATES, same assertions
             # as s1. apply_edge's subject _wlock only fires for arity:1 (mutate.py), so this is the

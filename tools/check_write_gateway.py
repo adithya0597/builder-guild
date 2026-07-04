@@ -17,9 +17,11 @@ self-test fixtures (which inject violations on purpose) + this gate itself (it c
 
 Exit 0 + WRITE_GATEWAY_OK if clean; exit 1 + the offending file:line(s) otherwise.
 """
+import os
 import pathlib
 import re
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).parent.parent
 SCAN_DIRS = ["01-context/src", "02-agents/src", "03-evals/src", "tools"]
@@ -54,6 +56,61 @@ def violations():
     return hits
 
 
+# builder-guild-62f: second static scan — call-sites of mutate.apply_edge / mutate.resolve_entity
+# (or the bare import itself) in modules OUTSIDE this allowlist. Catches the bypass EDGE_PAT can't
+# see: a module that imports mutate and calls apply_edge writes no RELATES_TO literal at all.
+# 12 real callers (grepped 01-context/src 02-agents/src 03-evals/src tools) + 3 prose-only files
+# that only mention the pattern in a docstring/print (check_write_gateway.py, invariant_check.py,
+# retention_sweep.py) + mutate.py itself (0 hits, kept for parity with ALLOWLIST above).
+CALL_ALLOWLIST = {
+    "mutate.py", "check_write_gateway.py", "invariant_check.py", "retention_sweep.py",
+    "race_test.py", "etl.py", "embed.py", "etl_history.py", "staging_race_test.py",
+    "stamp.py", "sweep.py", "staging.py", "demo_seed.py", "eval_planner.py",
+    "gt2_draft.py", "rollback.py",
+}
+IMPORT_CALL_PAT = re.compile(r"mutate\.apply_edge|mutate\.resolve_entity|from mutate import|import mutate")
+
+
+def import_violations():
+    # identical loop shape to violations(): same SCAN_DIRS, CALL_ALLOWLIST not ALLOWLIST,
+    # IMPORT_CALL_PAT.search(line) instead of the EDGE_PAT+WRITE_PAT window logic.
+    hits = []
+    for d in SCAN_DIRS:
+        base = ROOT / d
+        if not base.is_dir():
+            continue
+        for p in sorted(base.glob("*.py")):
+            if p.name in CALL_ALLOWLIST:
+                continue
+            try:
+                lines = p.read_text().splitlines()
+            except FileNotFoundError:
+                continue  # vanished mid-scan (e.g. a concurrent --selftest's own temp file)
+            for i, line in enumerate(lines):
+                if IMPORT_CALL_PAT.search(line):
+                    hits.append((p.relative_to(ROOT), i + 1, line.strip()))
+    return hits
+
+
+def _selftest():
+    # clause (a): plant a violation under a scanned dir, assert it's flagged at that file:line,
+    # clean up in finally — zero residue even if the assert raises.
+    # mkstemp, not a fixed path + write_text: O_EXCL refuses a pre-planted symlink (CWE-59) and
+    # the unique name means two concurrent --selftest runs can't collide on the same file.
+    root_abs = ROOT.resolve()
+    fd, path_str = tempfile.mkstemp(dir=str(root_abs / "tools"), suffix="_wg_selftest_violation.py")
+    target = pathlib.Path(path_str)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write("import mutate\nmutate.apply_edge(1, 2, 3)\n")
+        rel = target.relative_to(root_abs)
+        flagged = {(p, ln) for p, ln, _ in import_violations() if p == rel}
+        assert (rel, 2) in flagged, f"selftest violation not flagged: {flagged}"
+    finally:
+        target.unlink(missing_ok=True)
+    print("WRITE_IMPORTS_SELFTEST_OK")
+
+
 def main():
     hits = violations()
     if hits:
@@ -64,7 +121,18 @@ def main():
         sys.exit(1)
     print(f"scanned {SCAN_DIRS} (allowlist: {sorted(ALLOWLIST)})")
     print("WRITE_GATEWAY_OK")
+    import_hits = import_violations()
+    if import_hits:
+        print(f"WRITE_IMPORTS VIOLATION — {len(import_hits)} mutate call-site(s)/import(s) outside "
+              f"CALL_ALLOWLIST:")
+        for path, ln, text in import_hits:
+            print(f"  {path}:{ln}: {text}")
+        sys.exit(1)
+    print("WRITE_IMPORTS_OK")
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        _selftest()
+        sys.exit(0)
     main()

@@ -36,8 +36,10 @@ EmbeddingGemma vector via embed.embed_node (kind=prose). When a node splits into
 also materializes one indexed :Chunk per chunk (cf7); single-chunk nodes get none. $0 / local — the
 model runs on-box, no API.
 """
+import hashlib
 import os
 import sys
+from pathlib import Path
 from neo4j import GraphDatabase
 from mutate import resolve_entity
 from embed import embed_node, assert_chunk_namespace_isolation, detect_kind
@@ -45,9 +47,12 @@ from embed import embed_node, assert_chunk_namespace_isolation, detect_kind
 URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 NOW = "2026-06-14T02:00:00Z"   # explicit clock (no ambient datetime); after etl's NOW1/NOW2
 
-# A fixed, NON-EMPTY stand-in tree-sha (a real PageIndex deploy stamps the true sha). Non-empty is
-# the load-bearing property: serve()'s deep_warranted requires `pageindex_doc_sha <> ''`.
-CTX_EVALS_SHA = "demo-sha-context-evals-0001"
+# Real path (repo-root-relative) + a real sha256 (computed at seed time in seed_extras below) —
+# paired by convention with pageindex_adapter.py's hardcoded "doc": "extsrc:context-evals" key
+# (see its cross-reference comment). Non-empty sha is the load-bearing property: serve()'s
+# deep_warranted requires `pageindex_doc_sha <> ''`.
+CTX_EVALS_REF = "01-context/HYBRID_RETRIEVAL_ARCHITECTURE.md"
+CTX_EVALS_DOC_PATH = Path(__file__).parent.parent / "HYBRID_RETRIEVAL_ARCHITECTURE.md"
 
 # the demo-critical nodes the embedding-path demos structurally depend on (presence + embedding)
 DEMO_CRITICAL = ["issue:ACME-2", "issue:ACME-4", "issue:ACME-9", "extsrc:context-evals",
@@ -80,9 +85,10 @@ def seed_extras(session, now=NOW):
         short="Sufficient Context paper",
         long_="The sufficient-context paper studies when a model should abstain versus answer under "
               "low retrieval coverage; it finds abstention beats answering on insufficient context."))
+    ctx_evals_sha = hashlib.sha256(open(CTX_EVALS_DOC_PATH, "rb").read()).hexdigest()
     session.execute_write(lambda tx: tx.run(
         "MATCH (n:Entity {key:'extsrc:context-evals'}) SET n.pageindex_ref=$ref, n.pageindex_doc_sha=$sha",
-        ref="/docs/context-evals.md", sha=CTX_EVALS_SHA))
+        ref=CTX_EVALS_REF, sha=ctx_evals_sha))
     # cf7/bzr CHUNK_RECALL — a genuine MULTI-sentence engineering runbook. chunk_prose splits this into
     # >1 chunk, so embed_node materializes one indexed :Chunk per chunk. The distinctive "reaper reclaims
     # idle connections" passage is buried mid-doc (the doc spans health/pooling/backups/timeouts), so a

@@ -86,15 +86,24 @@ def _get(tx, cand_id):
 def approve(session, cand_id, now):
     """pending -> approved (records reviewed_at). Raises ValueError (naming the id and required
     status, mirroring promote()'s guard) when cand_id is missing or not 'pending' — a no-match must
-    never look like a success to the CLI/operator."""
+    never look like a success to the CLI/operator. Race-safe: locks the candidate first (same _plock
+    as promote()), so a concurrent approve/reject/promote on the same cand_id serializes here; the
+    loser's guarded CAS then raises with a message naming the lost race."""
     def _work(tx):
+        # lock-first, same _plock promote() uses (see promote()'s comment, staging.py:143-148, for
+        # why): serializes approve/reject/promote against EACH OTHER on the SAME cand_id.
+        tx.run("MATCH (c:Candidate {cand_id:$id}) SET c._plock=$now", id=cand_id, now=now)
         c = _get(tx, cand_id)
         if c is None:
             raise ValueError(f"approve: no candidate {cand_id}")
         if c["status"] != "pending":
             raise ValueError(f"approve requires status=pending, got '{c['status']}' for {cand_id}")
-        tx.run("MATCH (c:Candidate {cand_id:$id}) SET c.status='approved', c.reviewed_at=datetime($now)",
-               id=cand_id, now=now)
+        won = tx.run("MATCH (c:Candidate {cand_id:$id, status:'pending'}) "
+                     "SET c.status='approved', c.reviewed_at=datetime($now) RETURN c.cand_id AS id",
+                     id=cand_id, now=now).single()
+        if won is None:
+            raise ValueError(f"approve: lost status race — candidate {cand_id} no longer 'pending' "
+                              f"(concurrent approve/reject won); nothing written")
     session.execute_write(_work)
 
 
@@ -102,17 +111,24 @@ def reject(session, cand_id, reason, now):
     """pending/approved -> rejected (records review_reason + reviewed_at). Raises ValueError (naming
     the id and required status, mirroring promote()'s guard) when cand_id is missing or not
     pending/approved. Never touches the graph — a :Candidate property write only, leaving an
-    auditable rejected record. CAVEAT (builder-guild-gtb): this write carries no status CAS, so a
-    reject racing a concurrent promote() can land AFTER the promote committed its edge — leaving
-    status='rejected' with the edge still live until lifecycle CAS hardening lands."""
+    auditable rejected record. Race-safe: locks the candidate first (same _plock as approve()/
+    promote()), so reject dominates a concurrent approve (both may legally succeed, ending
+    'rejected') and is refused after a concurrent promote (raises, edge and status untouched)."""
     def _work(tx):
+        # lock-first, same _plock approve()/promote() use — serializes reject against a concurrent
+        # approve/promote on the SAME cand_id.
+        tx.run("MATCH (c:Candidate {cand_id:$id}) SET c._plock=$now", id=cand_id, now=now)
         c = _get(tx, cand_id)
         if c is None:
             raise ValueError(f"reject: no candidate {cand_id}")
         if c["status"] not in ("pending", "approved"):
             raise ValueError(f"reject requires status in ['pending','approved'], got '{c['status']}' for {cand_id}")
-        tx.run("MATCH (c:Candidate {cand_id:$id}) SET c.status='rejected', c.review_reason=$reason, "
-               "c.reviewed_at=datetime($now)", id=cand_id, reason=reason, now=now)
+        won = tx.run("MATCH (c:Candidate {cand_id:$id}) WHERE c.status IN ['pending','approved'] "
+                     "SET c.status='rejected', c.review_reason=$reason, c.reviewed_at=datetime($now) "
+                     "RETURN c.cand_id AS id", id=cand_id, reason=reason, now=now).single()
+        if won is None:
+            raise ValueError(f"reject: lost status race — candidate {cand_id} no longer in "
+                              f"['pending','approved'] (concurrent promote/reject won); nothing written")
     session.execute_write(_work)
 
 
@@ -440,7 +456,7 @@ def _fmt_candidate(c):
     if c.get("staged_at"):
         extra += f"  staged={c['staged_at']}"
     if c.get("review_reason"):
-        extra += f"  reason={c['review_reason']}"
+        extra += f"  reason={c['review_reason']!r}"
     # evidence/source are LLM-origin (low-trust) text rendered at the reviewer's trust-decision
     # moment — repr() them so ANSI/OSC escapes can't spoof the terminal line being reviewed.
     if c.get("evidence"):

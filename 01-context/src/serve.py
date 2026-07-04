@@ -407,6 +407,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                                    "deep_fired": deep_fired, "deep_augmented": deep_augmented,
                                    "pageindex_host": pageindex_host_note,
                                    "resolved_at": deep.get("resolved_at") if deep else None,
+                                   "mechanism": deep.get("mechanism") if deep else None,
                                    "n_pageindex_sections": len(pageindex_items)}
 
         # (b)+(c) NORMALIZE -> EPIST AUTHORITY ORDER -> the ordered set builds the gate claims.
@@ -579,7 +580,7 @@ def _demo():
     # (a) the normalizer produces a prose-authority EvidenceItem with host key + section id +
     #     source path — fields the join CODE sets, not the drill dict:
     pit = evidence.from_pageindex(host_node_id=_DRILL["doc"], namespace="shared",
-                                  text=_DRILL["answer"], source_path="/docs/context-evals.md",
+                                  text=_DRILL["answer"], source_path="01-context/HYBRID_RETRIEVAL_ARCHITECTURE.md",
                                   section_id=_DRILL["sections"][0], node_fresh="fresh")
     fail += [] if (pit.retrieval_method == "pageindex" and pit.authority_hint == "prose"
                    and pit.node_id == _DRILL["doc"] and pit.section_id == _DRILL["sections"][0]

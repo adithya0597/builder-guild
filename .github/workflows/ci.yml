@@ -53,6 +53,7 @@ jobs:
         run: |
           python tools/check_write_gateway.py | tee /tmp/gateway.log
           grep -q WRITE_GATEWAY_OK /tmp/gateway.log
+          grep -q WRITE_IMPORTS_OK /tmp/gateway.log
 
   graph:
     # Real Neo4j. Gates the ingest/write engine + invariant backstops: seed schema -> spine ingest
@@ -138,3 +139,7 @@ jobs:
         run: |
           python 02-agents/src/selftest_mcp.py | tee /tmp/mcp.log
           grep -q MCP_SERVE_OK /tmp/mcp.log
+      - name: rollback gate (b9y — namespace-scoped rollback + orphaned candidate sweep; no unscoped wipes)
+        run: |
+          python 01-context/src/rollback.py --selftest | tee /tmp/rollback.log
+          grep -q ROLLBACK_OK /tmp/rollback.log
