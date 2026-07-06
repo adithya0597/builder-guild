@@ -55,3 +55,11 @@ audits/
 # Beads issue tracker — local project management; issues.jsonl references git-ignored audits/ and
 # internal decisions, so keep the whole tracker out of the public repo.
 .beads/
+
+# Run-artifact / workspace-metadata dirs — local-only (same rationale as audits/ above): .gstack/
+# local security reports, .buildloop/ run ledger + specs, .conductor/ workspace metadata,
+# .explore/ research ledger (previously only excluded via the unshared .git/info/exclude).
+.gstack/
+.buildloop/
+.conductor/
+.explore/

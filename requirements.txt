@@ -7,6 +7,7 @@ neo4j==6.2.0           # Apache-2.0  (Python driver; the Neo4j DB runs as a sepa
 neo4j-graphrag==1.17.0 # Apache-2.0
 networkx==3.6.1        # BSD-3-Clause — default community-detection backend
 pyyaml==6.0.3          # MIT — serve.py + reconcile load relations.yaml (FUNCTIONAL_RELS); the default serve path needs it
+mcp==1.28.1            # MIT — read-only MCP stdio surface over serve() (02-agents/src/mcp_server.py)
 
 # Optional, higher-quality Leiden community detection lives in
 # requirements-leiden.txt and pulls GPL deps. communities.py uses algo="auto",

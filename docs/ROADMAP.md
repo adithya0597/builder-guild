@@ -7,10 +7,13 @@ Ordered by what the last calibration run proved is missing (see
 
 RAG-pattern coverage (see `01-context/RETRIEVAL.md` + `HYBRID_RETRIEVAL_ARCHITECTURE.md`):
 - **Hybrid RAG** — ✅ shipped (keyword + graph + vector ladder, RRF fusion).
-- **GraphRAG** — ✅ shipped; communities exist as a standalone module, NOT wired into the live serve() path (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven).
+- **GraphRAG** — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); communities (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven) are now wired into the live `serve()` path as flag-gated, read-only enrichment — default OFF (`include_communities=False` / `SERVE_INCLUDE_COMMUNITIES=1` env override), community authority (0.2) kept below graph (1.0) in `01-context/src/epist.py`'s `DEFAULT_AUTHORITY` (builder-guild-o46).
 - **Corrective RAG** — ✅ shipped; corrective_serve() exists but is NOT the default serve() path (it wraps serve()) (`01-context/src/corrective.py`, bounded rewrite→re-retrieve + $0-or-STOP web fallback).
 - **Agentic RAG** — ◐ PARTIAL (mechanism only) → gap **G1** below.
-- **Multimodal RAG** — ✗ NOT built (text-only) → gap **G2** below.
+- **Multimodal RAG** — ◐ PARTIAL: OCR adapter + ETL ingest exist (`01-context/src/ocr_adapter.py`, `etl.ingest_ocr_doc` at `01-context/src/etl.py:154-176`, eval harness `03-evals/src/eval_ocr.py`) but ETL-only — not reachable from live `serve()` → gap **G2** below.
+- **Ingest-time staging gate** (builder-guild-7mg) — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); `:Candidate` staging with `approve()`/`reject()`/`promote()`, where `promote()` materializes THROUGH `mutate.apply_edge` (the sole edge-write gateway); the `origin='llm'` entrypoint `stage_llm()` holds no reference to `apply_edge`, so an LLM extraction is structurally unable to write a fact directly (`01-context/src/staging.py`, self-test prints `STAGING_OK`).
+- **Session-history ingest** (builder-guild-22w) — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); real `~/.engram/engram.db` observations + `.explore/source-ledger.jsonl` ingested into the `history` namespace via `mutate.apply_edge` (`PART_OF`), embedded, and retrievable through `serve()` (`01-context/src/etl_history.py`, self-test prints `HISTORY_INGEST_OK` + `HISTORY_SERVE_OK`).
+- **Read-only MCP server** (builder-guild-9fe) — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); stdio MCP surface over `serve()`/`node_card()` exposing `query_context`/`node_card`/`health`/`list_namespaces`; role is bound server-side from `BG_MCP_ROLE` at process start — no tool accepts a role/namespace parameter, so a client-supplied one is silently dropped by FastMCP's generated schema (`02-agents/src/mcp_server.py` + `02-agents/src/selftest_mcp.py`, self-test prints `MCP_SERVE_OK`; `mcp==1.28.1` pinned in `requirements.txt`).
 
 **Gate state: suggest-only.** `01-context/src/abstain.py` has `CALIBRATED=False` with provisional
 weights, so every decision routes to a human — autonomy is not leased. The last calibration run
@@ -20,7 +23,7 @@ correctly refuses to certify → trust track **G3** below.
 
 ## Near
 
-1. **Temporal-evidence layer.** `valid_from`/`valid_to` event history + an as-of query path, so
+1. **Temporal-evidence layer.** ◐ PARTIAL — `as_of` exists on `node_card()` only (`01-context/src/serve.py:19-39`); `serve()` itself (`serve.py:122`) takes no `as_of` param, and `node_card()` has exactly one caller in the file — the CLI fallback (`serve.py:746`). Remaining gap: thread `as_of` through `serve()` so
    "who owned X on <date>" is answered from evidence or abstained — never from current state.
    *Accept:* the temporal golden item flips from abstain-expected to pass-with-evidence and a
    planted supersession chain answers correctly at three time points.
@@ -69,11 +72,13 @@ coordination); G1 is one agent choosing its own retrieval strategy.
 and the trace shows each decision point. Stays $0/local + namespace-scoped (isolation self-check clean).
 
 ### G2 — Multimodal RAG (OCR-first, NOT vision-default)
-Not built; text-only. When built, default to an **OCR pipeline (or hybrid), NOT ColPali/vision** —
+ETL-only today: `ocr_adapter.py` + `etl.ingest_ocr_doc` (`etl.py:154-176`) + `03-evals/src/eval_ocr.py`
+exist (T1-T4 pass); not reachable from live `serve()`. Default stays an **OCR pipeline (or hybrid),
+NOT ColPali/vision** —
 `arXiv:2505.05666` found OCR beats ColPali in *all* evaluated settings (L0 MRR .5151 vs .2971);
 vision wins only when fine-tuned on target data, and CLIP/ColPali would break the $0/local simplicity.
-*Start:* a pluggable OCR adapter (env-generic, mirrors `03-evals/src/judge_adapter.py`) that feeds
-text into the existing ladder; keep it behind the eval gate.
+*Start:* wire the existing OCR adapter's output into the `serve()` ladder — the adapter and ETL
+ingest are done; the remaining gap is retrieval-path wiring, not adapter creation.
 *Accept:* a PDF-with-diagram doc is indexed via OCR and retrieved through the existing
 namespace-scoped ladder; an A/B vs a vision baseline is *measured* (not assumed); $0/local default holds.
 

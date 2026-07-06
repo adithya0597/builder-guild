@@ -39,6 +39,28 @@ def node_card(key, allowed, as_of=None):
         return rec.data() if rec else None
 
 
+# GraphRAG communities (o46): flag-gated, read-only enrichment for the top fused hits.
+# MATCH-only (zero writes); c.namespace IN $allowed scopes which communities are visible, and the
+# SEED match (fused hit -> :IN_COMMUNITY -> :Community) ALSO scopes the edge itself via
+# sr.namespace IN $allowed — a malformed seed edge whose own namespace is out-of-scope must not be
+# able to select a community that doesn't validly overlap the fused hit. The member-expansion match
+# below scopes m.namespace + r.namespace IN $allowed the same way (defense-in-depth, mirrors
+# NODE_CARD's o.namespace/r.namespace convention above): build-time isolation (communities.py) keeps
+# a clean community single-namespace, but a stale/malformed :IN_COMMUNITY edge — on either the seed
+# or the expansion side — must not leak an out-of-scope entity's key into member_keys on READ.
+# Presentation-layer only — never folds into merged_items/gate claims (epist.py carries the
+# "community" authority weight, below graph).
+COMMUNITY_Q = """
+MATCH (e:Entity)-[sr:IN_COMMUNITY]->(c:Community)
+WHERE e.key IN $keys AND c.namespace IN $allowed AND sr.namespace IN $allowed
+WITH DISTINCT c
+MATCH (m:Entity)-[r:IN_COMMUNITY]->(c)
+WHERE m.namespace IN $allowed AND r.namespace IN $allowed
+RETURN c.key AS id, c.summary AS summary, collect(m.key) AS member_keys
+ORDER BY c.key
+"""
+
+
 def _support_coverage(query_text, primary, presentable_facts):
     """G3 Item 2 — DETERMINISTIC support-fact coverage signal (replaces the anti-correlated
     fact-count proxy that fit W_SUFFICIENCY≈−4.089). Pure (no Neo4j, no globals) so test_g3 can
@@ -105,7 +127,8 @@ def _host_freshness(s, key, allowed):
     return ("stale" if rec["dirty"] else "fresh"), rec["ns"]
 
 
-def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=False):
+def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=False,
+          include_communities=False):
     """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
     serve-join (deep PageIndex escalation, OPT-IN) -> gate+abstain -> execute.
@@ -131,6 +154,9 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
     """
     import scope as _scope, ladder, fuse, stamp, reconcile, abstain, evidence, epist
     import pageindex_adapter
+    # env can only turn communities ON (never off): param passed True always wins; param
+    # omitted/False lets SERVE_INCLUDE_COMMUNITIES=1 flip it (o46).
+    include_communities = include_communities or os.environ.get("SERVE_INCLUDE_COMMUNITIES") == "1"
     sc = _scope.scope(role)
     allowed, k = sc["allowed"], sc["t_cap"]
     action = action or {"category": "routine", "reversible": True}
@@ -172,9 +198,15 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
             # UNIFORM RETURN CONTRACT: same keys as the normal return below, so a caller never
             # KeyErrors on the abstain path (surfaced when vector_rung degrades to [] without the
             # optional embedder and keyword/graph also miss). primary=None signals nothing retrieved.
-            return {"query": query_text, "role": role, "primary": None, "presentable_facts": [],
-                    "composed_evidence": [], "decision": "abstain", "mode": "suggest",
-                    "reason": "no in-scope retrieval", "executed": False, "provenance": {}, "trace": trace}
+            no_retrieval = {"query": query_text, "role": role, "primary": None, "presentable_facts": [],
+                            "composed_evidence": [], "decision": "abstain", "mode": "suggest",
+                            "reason": "no in-scope retrieval", "executed": False, "provenance": {}, "trace": trace}
+            # o46: flag-ON must still carry "communities" on a miss query (uniform envelope, never a
+            # missing key); flag-OFF stays BYTE-IDENTICAL to pre-o46 (no key added at all).
+            if include_communities:
+                trace["communities"] = []
+                no_retrieval["communities"] = []
+            return no_retrieval
         fused = fuse.rrf(rankings)
         # 2b. RERANK (9jq) — OPT-IN cross-encoder rerank of the fused set. Default OFF: serve stays
         # $0/RRF-only (the shipping path). When rerank=True AND sentence-transformers is installed,
@@ -202,6 +234,17 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         fused_keys = [kk for kk, _ in fused]
         primary = fused_keys[0]
         trace["fuse"] = {"fused_top": fused[:k]}
+
+        # COMMUNITIES (o46) — flag-gated, read-only enrichment: communities overlapping the top
+        # fused hits, role-scoped. Presentation-only (see COMMUNITY_Q docstring); computed here so
+        # `comm_block` is a local var the session can populate before it closes (used below, after
+        # the `with` block, only when the flag is on).
+        comm_block = None
+        if include_communities:
+            comm_rows = s.run(COMMUNITY_Q, keys=fused_keys[:k], allowed=allowed).data()
+            comm_block = [{"id": r["id"], "summary": r["summary"], "member_keys": r["member_keys"],
+                           "provenance": "community"} for r in comm_rows]
+            trace["communities"] = comm_block
 
         # 3. EPIST — source authority (keyword/graph = fact-authority > vector = recall)
         sources = {kk: ("keyword" if kk in kw_hits else "graph" if kk in graph_hits
@@ -434,11 +477,14 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                                  "confidence_basis": conf_basis, **decision,
                                  "executed": executed["executed"]}
 
-    return {"query": query_text, "role": role, "primary": primary,
-            "presentable_facts": [f["fact"] for f in card["presentable"]],
-            "composed_evidence": composed,
-            "decision": decision["final"], "mode": decision["mode"],
-            "executed": executed["executed"], "provenance": sources, "trace": trace}
+    result = {"query": query_text, "role": role, "primary": primary,
+              "presentable_facts": [f["fact"] for f in card["presentable"]],
+              "composed_evidence": composed,
+              "decision": decision["final"], "mode": decision["mode"],
+              "executed": executed["executed"], "provenance": sources, "trace": trace}
+    if include_communities:
+        result["communities"] = comm_block
+    return result
 
 
 def _demo():
@@ -633,12 +679,152 @@ def _chunk_demo():
     print("CHUNK_RECALL_OK")
 
 
+def _communities_demo():
+    """o46: GraphRAG communities wired into serve() — flag-gated, read-only enrichment.
+    Own fixture setup (mirrors _chunk_demo()'s "assumes the pipeline ran" convention): builds
+    communities for engineering+finance via communities.py's existing, already-approved write
+    path (never through serve()). Assumes etl.py + demo_seed.py already ran.
+    Proves the bead's 4 acceptance clauses (a)-(d)."""
+    import sys, json, re
+    import communities, epist
+
+    fail = []
+
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        communities.build_communities(s, namespaces=["engineering", "finance"], algo="auto",
+                                      summarize=False, run_id="serve-comm-demo",
+                                      now="2026-07-02T00:00:00")
+
+    # (a) enrichment shape + authority
+    q = "issue:ACME-2 blocks issue:ACME-1"
+    r_on = serve(q, "engineering", include_communities=True)
+    comms_on = r_on.get("communities")
+    print(f"[comm-a]  engineering communities: {comms_on}")
+    fail += [] if "communities" in r_on else ["(a) 'communities' key missing when flag ON"]
+    fail += [] if comms_on else ["(a) communities empty (engineering has >=1 entity -> >=1 community)"]
+    fail += [] if comms_on and all(set(c.keys()) == {"id", "summary", "member_keys", "provenance"}
+                                   and c["provenance"] == "community" for c in comms_on) \
+        else ["(a) community item shape/provenance wrong"]
+    eng_w, def_w = epist.weights_for("engineering"), epist.weights_for("_default")
+    fail += [] if eng_w["community"] < eng_w["graph"] else ["(a) engineering: community authority must be < graph"]
+    fail += [] if def_w["community"] < def_w["graph"] else ["(a) _default: community authority must be < graph"]
+
+    # (b) OFF byte-identity: omitted flag vs explicit False must match, and carry no 'communities' key
+    r_off1 = serve(q, "engineering")
+    r_off2 = serve(q, "engineering", include_communities=False)
+    j1 = json.dumps(r_off1, sort_keys=True, default=str)
+    j2 = json.dumps(r_off2, sort_keys=True, default=str)
+    print(f"[comm-b]  OFF byte-identical: {j1 == j2}")
+    fail += [] if j1 == j2 else ["(b) omitted-flag vs explicit-False responses differ"]
+    fail += [] if "communities" not in r_off1 else ["(b) 'communities' key present when flag OFF"]
+    fail += [] if "communities" not in r_off1["trace"] else ["(b) trace['communities'] present when flag OFF"]
+    pre_change_keys = {"query", "role", "primary", "presentable_facts", "composed_evidence",
+                       "decision", "mode", "executed", "provenance", "trace"}
+    fail += [] if set(r_off1.keys()) == pre_change_keys else [f"(b) key set drifted: {set(r_off1.keys())}"]
+
+    # (c) zero writes: the literal query string is MATCH-only
+    fail += [] if not re.search(r"CREATE|MERGE|SET|DELETE|REMOVE", COMMUNITY_Q, re.I) \
+        else ["(c) COMMUNITY_Q contains a write verb"]
+
+    # (d) 2-namespace isolation
+    r_fin = serve("issue:ACME-4", "finance", include_communities=True)
+    comms_fin = r_fin.get("communities", [])
+    print(f"[comm-d]  finance communities: {comms_fin}")
+    fail += [] if all(c["id"].startswith("community:finance:") or c["id"].startswith("community:shared:")
+                      for c in comms_fin) else ["(d) finance surfaced a non-finance/shared community id"]
+    fail += [] if not any(mk in ("issue:ACME-1", "issue:ACME-2")
+                          for c in comms_fin for mk in c["member_keys"]) \
+        else ["(d) finance surfaced an engineering-only member key"]
+    fail += [] if not any(c["id"].startswith("community:finance:") for c in comms_on) \
+        else ["(d) engineering surfaced a finance community id"]
+    fail += [] if not any(mk in ("agent:cfo", "issue:ACME-4")
+                          for c in comms_on for mk in c["member_keys"]) \
+        else ["(d) engineering surfaced a finance-only member key"]
+
+    # (e) malicious fixture — read-path defense-in-depth. Build-time isolation (communities.py)
+    # keeps every CLEAN community single-namespace, but COMMUNITY_Q must still filter a
+    # stale/malformed :IN_COMMUNITY edge on READ. Inject one: finance's agent:cfo attached to an
+    # engineering community, edge stamped with the COMMUNITY's own namespace (exactly how a buggy
+    # write would look — see _write_community) so the test isolates the member-NODE check, not
+    # just an edge check. Assert agent:cfo never reaches engineering's member_keys, then clean up.
+    eng_comm_id = next((c["id"] for c in comms_on if c["id"].startswith("community:engineering:")), None)
+    fail += [] if eng_comm_id else ["(e) no engineering community found to inject the malformed edge into"]
+    if eng_comm_id:
+        with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+            s.run("MATCH (m:Entity {key:'agent:cfo'}), (c:Community {key:$ck}) "
+                  "MERGE (m)-[r:IN_COMMUNITY]->(c) SET r.namespace='engineering'", ck=eng_comm_id)
+            try:
+                r_leak = serve(q, "engineering", include_communities=True)
+                leaked = any(mk == "agent:cfo"
+                            for c in (r_leak.get("communities") or []) for mk in c["member_keys"])
+                print(f"[comm-e]  malformed edge (agent:cfo -> {eng_comm_id}) leaked into "
+                      f"engineering member_keys? {leaked} (must be False)")
+                fail += [] if not leaked else \
+                    ["(e) malformed :IN_COMMUNITY edge leaked agent:cfo (finance) into engineering member_keys"]
+            finally:
+                s.run("MATCH (:Entity {key:'agent:cfo'})-[r:IN_COMMUNITY]->(:Community {key:$ck}) DELETE r",
+                      ck=eng_comm_id)
+
+    # (g) malformed SEED edge — read-path defense-in-depth on the FIRST match (the seed match scopes
+    # c.namespace but, pre-fix, left the seed edge's OWN namespace unchecked). A decoy community
+    # (its own namespace IN $allowed, so c.namespace alone would not exclude it) gets ONE legitimate
+    # member (agent:cto, a real in-scope entity, via a properly-scoped edge) so it CAN survive the
+    # member-expansion match if wrongly selected as a candidate. Then a REAL fused hit (issue:ACME-1)
+    # is linked to the decoy via a MALFORMED seed edge whose own namespace is out-of-scope (finance,
+    # not in engineering's ["engineering","shared"]). If the seed match doesn't also check the edge's
+    # namespace, the decoy leaks in purely off that malformed edge.
+    decoy_id = "community:engineering:seed-test-g"
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        s.run("MERGE (c:Community {key:$ck}) SET c.namespace='engineering', c.summary='seed-test decoy'",
+              ck=decoy_id)
+        s.run("MATCH (m:Entity {key:'agent:cto'}), (c:Community {key:$ck}) "
+              "MERGE (m)-[r:IN_COMMUNITY]->(c) SET r.namespace='engineering'", ck=decoy_id)
+        s.run("MATCH (e:Entity {key:'issue:ACME-1'}), (c:Community {key:$ck}) "
+              "MERGE (e)-[r:IN_COMMUNITY]->(c) SET r.namespace='finance'", ck=decoy_id)
+        try:
+            r_seed = serve(q, "engineering", include_communities=True)
+            seed_leaked = any(c["id"] == decoy_id for c in (r_seed.get("communities") or []))
+            print(f"[comm-g]  malformed seed edge (issue:ACME-1 -[ns=finance]-> {decoy_id}) leaked? "
+                  f"{seed_leaked} (must be False)")
+            fail += [] if not seed_leaked else \
+                ["(g) malformed seed :IN_COMMUNITY edge (out-of-scope namespace) leaked a decoy community"]
+        finally:
+            s.run("MATCH (:Entity {key:'issue:ACME-1'})-[r:IN_COMMUNITY]->(:Community {key:$ck}) DELETE r",
+                  ck=decoy_id)
+            s.run("MATCH (:Entity {key:'agent:cto'})-[r:IN_COMMUNITY]->(:Community {key:$ck}) DELETE r",
+                  ck=decoy_id)
+            s.run("MATCH (c:Community {key:$ck}) DELETE c", ck=decoy_id)
+
+    # (h) empty-retrieval envelope consistency: a miss query (no keyword/graph/vector/chunk hits)
+    # returns from serve()'s early no-retrieval branch. Flag ON must still carry "communities": []
+    # (uniform envelope, never a missing key); flag OFF must carry no such key at all (byte-identical
+    # to pre-o46, same contract as (b) above). query_text="" (no pattern) is the guaranteed-empty
+    # trigger in THIS env — an arbitrary nonsense string does NOT reach zero rankings here because
+    # vector_rung has a real local embedder and returns nearest-neighbor hits for any non-empty text
+    # (no similarity floor); "" short-circuits keyword/vector/chunk rungs at their `if query_text`
+    # guards the same way corrective.py's graph-only serve(query_text='') calls already rely on.
+    r_miss_on = serve("", "engineering", include_communities=True)
+    r_miss_off = serve("", "engineering", include_communities=False)
+    print(f"[comm-h]  miss query -> flag-on communities={r_miss_on.get('communities')!r} "
+          f"flag-off has-key={'communities' in r_miss_off}")
+    fail += [] if ("communities" in r_miss_on and r_miss_on["communities"] == []) \
+        else ["(h) no-retrieval + flag ON must carry communities:[]"]
+    fail += [] if "communities" not in r_miss_off \
+        else ["(h) no-retrieval + flag OFF must not carry a communities key"]
+
+    if fail:
+        print("COMM_WIRED_FAIL:", fail); sys.exit(1)
+    print("COMM_WIRED_OK")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "demo":
         _demo()
     elif len(sys.argv) > 1 and sys.argv[1] == "chunk":
         _chunk_demo()
+    elif len(sys.argv) > 1 and sys.argv[1] == "communities":
+        _communities_demo()
     else:
         import json
         key = sys.argv[1] if len(sys.argv) > 1 else "issue:ACME-1"
