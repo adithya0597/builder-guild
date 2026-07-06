@@ -21,6 +21,14 @@ weights, so every decision routes to a human — autonomy is not leased. The las
 FAILED coverage gate (sufficiency refit weight positive yet selective gain −3.0pp), so the gate
 correctly refuses to certify → trust track **G3** below.
 
+**Decision-channel scoring** (item 3) — ✅ shipped: abstain-expected golden items are scored
+on the DECISION channel (`dec in ("abstain","escalate")`), never text-matched against the
+literal string "abstain" — eliminating the judge easy-agreement kappa-inflation artifact this
+item named. Mechanism: `cal3_fit.py:88-89` (abstain golds resolved deterministically, before
+the judge branch) + `cal3_fit.py:141` (the FIT target `should_act` gates on `expected=='pass'`,
+not correctness alone) + `cal4_sweep.py:111-116` (abstain-expected items excluded from the
+judge easy-set). Guarded by `test_g3.py:130-181` (`tc_abstain_channel`, prints `G3_OK`).
+
 ## Near
 
 1. **Temporal-evidence layer.** ◐ PARTIAL — `as_of` exists on `node_card()` only (`01-context/src/serve.py:19-39`); `serve()` itself (`serve.py:122`) takes no `as_of` param, and `node_card()` has exactly one caller in the file — the CLI fallback (`serve.py:746`). Remaining gap: thread `as_of` through `serve()` so
@@ -31,8 +39,6 @@ correctly refuses to certify → trust track **G3** below.
    weight) with a coverage-vs-question signal (Sufficient-Context-style autorater or deterministic
    support-fact coverage). *Accept:* refit yields a positive sufficiency weight and selective gain
    holds.
-3. **Decision-channel scoring** for abstain items in the golden scorer (text-matching "abstain" is
-   a category error). *Accept:* judge easy-agreement artifact disappears.
 
 ## Mid
 
@@ -85,9 +91,10 @@ namespace-scoped ladder; an A/B vs a vision baseline is *measured* (not assumed)
 ### G3 — Calibration / autonomy: the trust track (BLOCKS the autonomy lease)
 The gate is suggest-only because the last run FAILED its coverage gate and the sufficiency proxy
 fitted with a **negative** weight (a broken signal). This is items **2 → 3 → 4 → 5** in dependency
-order: (2) a *real* sufficiency signal → (3) decision-channel golden scoring → (4) golden-set v1 for
-a *measurable* κ → (5) the reversible per-namespace autonomy lease. Until 2–4 land, `CALIBRATED`
-stays False **by design** (refusing to certify is a success mode, not a bug).
+order: (2) a *real* sufficiency signal → (3) decision-channel golden scoring — ✅ shipped, see
+Status above → (4) golden-set v1 for a *measurable* κ → (5) the reversible per-namespace autonomy
+lease. Until 2 and 4 land, `CALIBRATED` stays False **by design** (refusing to certify is a success
+mode, not a bug).
 *Start:* re-run the sweep for a *current* reading (`03-evals/src/cal3_fit.py` + `cal4_sweep.py`),
 then `03-evals/CASE_STUDY_calibration.md`.
 *Accept:* sufficiency refits **positive** with a selective-accuracy gain over the confidence-only

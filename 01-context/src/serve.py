@@ -107,6 +107,42 @@ def _support_coverage(query_text, primary, presentable_facts):
     return round(min(1.0, len(q & r) / max(1, len(q))), 2)
 
 
+def _coverage_features(query_text, primary, presentable_facts):
+    """Sibling to _support_coverage — SAME Q/R construction (canonicalized bare-vs-prefixed
+    intersection, support-gated R), but exposes the raw sizes (|Q|, |Q∩R|) instead of the ratio,
+    for the richer cal3_fit feature matrix. Read-only diagnostics: threaded into trace only, never
+    fed back into abstain.stage_a_decision (the live gate still sees sufficiency+confidence alone).
+    Does NOT change _support_coverage's scalar contract (test_g3.py:90-122 pins that function).
+    # ponytail: deliberate ~8-line mirror — _support_coverage's body is test-pinned and out of this
+    # bead's touch-scope; dedupe into a shared _qr_sets() only if/when that pin is relaxed."""
+    def _canon(k):
+        return k.rsplit(":", 1)[-1]
+    q = {_canon(k) for k in re.findall(
+        r"\b(?:issue|agent):[A-Za-z0-9_-]+|[A-Z]+-\d+", query_text or "")}
+    r = set()
+    for f in presentable_facts:
+        m = re.search(r"->\s*(\S+)", f)
+        if m:
+            r.add(_canon(m.group(1)))
+    if presentable_facts:
+        r.add(_canon(primary))
+    return {"n_query_terms": len(q), "per_term_found": len(q & r)}
+
+
+_SRC_CLASS = {'obs': 'engram', 'cmobs': 'claude-mem', 'ledger': 'explore-ledger',
+              'runledger': 'run-ledger', 'extsrc': 'doc'}
+
+
+def _src_class(kk):
+    """Provenance-CLASS LABEL only (NOT sanitization — that stays a separate open item;
+    cso F1, .buildloop/specs/run4-review-report.md:14,28). Pure prefix->class map off the
+    key string already in scope at each composed_evidence append site in _add_card and the
+    pageindex append. Unmapped prefixes (issue:/agent:/project:/status:/community:) -> 'graph',
+    the structured-domain trust tier — an unrecognized-but-structured key defaults to the
+    highest-trust label, never silently to an externally-ingested class it doesn't belong to."""
+    return _SRC_CLASS.get(kk.split(':', 1)[0], 'graph')
+
+
 # serve-join (SERVE_JOIN_DESIGN §2-§3): the PageIndex host node's live freshness, read at serve
 # time. A dirty host node makes its drilled sections non-actionable (freshness propagation): the
 # section EvidenceItems inherit node_fresh="stale" -> freshness_state="dirty" -> the gate refuses
@@ -279,21 +315,22 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
             # ACT); this marker NEVER becomes a gate claim, it only annotates what is shown. Mirrors the
             # node-vector lazy-refresh staleness window — a pre-existing pattern, not a cf7 regression.
             # The [..] marker sits AFTER the (kk) token so existing content(kk)/content_chunk(kk) prefix
-            # matches (and the isolation issue:/agent: regex) are unaffected.
+            # matches (and the isolation issue:/agent: regex) are unaffected. The src:<class> provenance
+            # tag added inside the same bracket follows the identical placement rule, for the same reason.
             pmark = "stale" if crec["node_dirty"] else "fresh"
             ctx = s.run("MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
                         "RETURN n.long_context AS ctx", k=kk, allowed=allowed).single()
             if ctx and ctx["ctx"]:
-                composed.append(f"content({kk}) [{pmark}]: {ctx['ctx'][:200]}")
+                composed.append(f"content({kk}) [{pmark} src:{_src_class(kk)}]: {ctx['ctx'][:200]}")
             # bzr: a node retrieved via chunk-vector (rung 2b) surfaces its SELECTED passage — the chunk
             # the query actually matched — not just the long_context abstract (whose [:200] truncation may
             # cut before the relevant span). Only the ONE selected chunk is surfaced (chunk_passages is
             # already deduped to the best passage per parent), so this never bloats the answer with all
             # chunks (the bzr concern). This is the read that makes embed.py's n.chunks no longer dead.
             if kk in chunk_passages:
-                composed.append(f"content_chunk({kk}) [{pmark}]: {chunk_passages[kk][:200]}")
+                composed.append(f"content_chunk({kk}) [{pmark} src:{_src_class(kk)}]: {chunk_passages[kk][:200]}")
             for f in stamp.freshness_judge(stamp.stamp_card(crec)):
-                composed.append(f"{kk}: {f['fact']}")
+                composed.append(f"{kk} [src:{_src_class(kk)}]: {f['fact']}")
                 m = re.search(r"->\s*(\S+)", f["fact"])
                 if m:
                     expand.append(m.group(1))
@@ -399,7 +436,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                             source_path=src_path,
                             section_id=",".join(deep["sections"]),
                             node_fresh=host_fresh))
-                        composed.append(f"pageindex({host}): {deep['answer']}")   # augment answer surface
+                        composed.append(f"pageindex({host}) [src:{_src_class(host)}]: {deep['answer']}")   # augment answer surface
                         deep_augmented = True
             trace["serve_join"] = {"coverage_initial": coverage_initial,
                                    "drill_candidate": drill_candidate, "candidate_has_sha": candidate_has_sha,
@@ -470,12 +507,14 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         # G3 Item 2 — DETERMINISTIC support-fact coverage signal. Computed by the pure
         # module-level helper _support_coverage() (see its docstring): canonicalized
         # bare-vs-prefixed intersection, support-gated R, and |Q|=0 -> 0.0 (NO count fallback).
-        sufficiency = _support_coverage(query_text, primary, [f["fact"] for f in card["presentable"]])
+        presentable_fact_list = [f["fact"] for f in card["presentable"]]
+        sufficiency = _support_coverage(query_text, primary, presentable_fact_list)
+        cov_features = _coverage_features(query_text, primary, presentable_fact_list)
 
         decision = abstain.stage_a_decision(claims, action, sufficiency, self_conf, role=role)
         executed = abstain.execute(decision, lambda: f"acted on {primary}")
         trace["gate_abstain"] = {"sufficiency": sufficiency, "self_confidence": self_conf,
-                                 "confidence_basis": conf_basis, **decision,
+                                 "confidence_basis": conf_basis, **cov_features, **decision,
                                  "executed": executed["executed"]}
 
     result = {"query": query_text, "role": role, "primary": primary,
@@ -497,6 +536,15 @@ def _demo():
     serve() only ever calls pageindex_adapter.drill() for the deep drill (the retrieval/fusion
     rungs use keyword_rung/graph_rung/vector_rung directly), so the injection is surgical.
     """
+    # Pure tag-map check (l2i, no DB) — must hold before anything below opens a graph session.
+    assert _src_class('obs:1') == 'engram'
+    assert _src_class('cmobs:1') == 'claude-mem'
+    assert _src_class('ledger:2') == 'explore-ledger'
+    assert _src_class('runledger:3') == 'run-ledger'
+    assert _src_class('extsrc:finance-policy') == 'doc'
+    assert _src_class('issue:ACME-1') == 'graph'
+    assert _src_class('agent:cto') == 'graph'
+
     import sys, json
     import pageindex_adapter, evidence, epist
 
@@ -505,6 +553,7 @@ def _demo():
     print(f"\n[serve] primary={r['primary']} decision={r['decision']} mode={r['mode']} "
           f"executed={r['executed']}")
     print(f"[serve] presentable_facts={r['presentable_facts']}")
+    print(f"[serve] composed_evidence={r['composed_evidence']}")
     stages = {"retrieve", "fuse", "epist", "stamp_reconcile", "gate_abstain"}
     ok = stages <= set(r["trace"]) and r["decision"] in ("pass", "partial", "abstain", "escalate")
     print("INT3_OK" if ok else f"INT3_FAIL stages={set(r['trace'])} decision={r['decision']}")

@@ -19,16 +19,18 @@ import math
 import sys
 
 # Stage-gate: per-namespace dict. Default all False. Roles: engineering, finance, operations,
-# product, market, governance, shared. Granting a lease is HUMAN-ONLY — no code sets True.
-# auto_revert() REVOKES only (sets False when below bar). Read via CALIBRATED.get(role, False).
+# product, market, history, governance — kept in exact key-parity with scope.ROLE_NAMESPACES
+# (drift guard: demo() asserts set(CALIBRATED)==set(scope.ROLE_NAMESPACES)). Granting a lease is
+# HUMAN-ONLY — no code sets True. auto_revert() REVOKES only (sets False when below bar).
+# Read via CALIBRATED.get(role, False).
 CALIBRATED = {
     "engineering": False,
     "finance":     False,
     "operations":  False,
     "product":     False,
     "market":      False,
+    "history":     False,
     "governance":  False,
-    "shared":      False,
 }
 
 # PROVISIONAL weights — NOT calibrated. Placeholders with the right SHAPE; magnitudes are guesses
@@ -41,6 +43,10 @@ TAU = 0.5              # PROVISIONAL selective-action threshold
 
 def _sigmoid(x):
     return 1.0 / (1.0 + math.exp(-x))
+
+
+def _is_measurable_number(x):
+    return isinstance(x, (int, float)) and math.isfinite(float(x))
 
 
 def selective_score(sufficiency, self_confidence):
@@ -112,13 +118,17 @@ def auto_revert(role, kappa, gain, kappa_bar=0.8, gain_bar=0.0):
     """
     if role not in CALIBRATED:
         return {"role": role, "revoked": False, "reason": f"unknown role {role!r}"}
-    below = kappa < kappa_bar or gain < gain_bar
+    unmeasurable = not (_is_measurable_number(kappa) and _is_measurable_number(gain))
+    below = unmeasurable or kappa < kappa_bar or gain < gain_bar
     if below and CALIBRATED[role]:
         CALIBRATED[role] = False
-        reason = f"kappa={kappa:.3f}<{kappa_bar} or gain={gain:.3f}<{gain_bar} -> revoked"
+        reason = (f"kappa={kappa} gain={gain} -> unmeasurable, fail-closed revoke"
+                  if unmeasurable else
+                  f"kappa={kappa:.3f}<{kappa_bar} or gain={gain:.3f}<{gain_bar} -> revoked")
         return {"role": role, "revoked": True, "reason": reason}
     reason = (f"kappa={kappa:.3f}>={kappa_bar} and gain={gain:.3f}>={gain_bar} -> no action"
-              if not below else f"already False -> no-op")
+              if not below else
+              f"already False -> no-op ({'unmeasurable' if unmeasurable else 'below bar'})")
     return {"role": role, "revoked": False, "reason": reason}
 
 
@@ -132,6 +142,15 @@ def demo():
     print(f"[mode]    CALIBRATED is dict={isinstance(CALIBRATED, dict)} all_false={all_false}")
     fail += [] if (isinstance(CALIBRATED, dict) and all_false) \
         else ["CALIBRATED must be a dict with all values False (no lease granted yet)"]
+
+    # G3 drift guard: CALIBRATED's keys must exactly match scope.ROLE_NAMESPACES's keys. A
+    # servable role scope.py knows about but CALIBRATED has no slot for could never be leased
+    # (etl_history.py already calls serve(role="history") in production); a stale CALIBRATED key
+    # with no scope.py counterpart is dead weight that just adds lease-audit noise.
+    import scope
+    key_drift = set(CALIBRATED) ^ set(scope.ROLE_NAMESPACES)
+    print(f"[drift]   set(CALIBRATED)==set(scope.ROLE_NAMESPACES): {not key_drift} (diff={key_drift or set()})")
+    fail += [] if not key_drift else [f"CALIBRATED/ROLE_NAMESPACES key drift: {key_drift}"]
 
     # THE KEY CASE: low sufficiency, HIGH confidence -> must ACT (not abstain). A sufficiency-alone
     # gate would wrongly abstain here; the combined logistic does not.

@@ -9,7 +9,9 @@ prompt, the caller must STOP, not fall back to a paid key."""
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import time
 
 from h2b3_judge import assert_no_self_family
@@ -18,6 +20,43 @@ JUDGE_CMD = os.path.expanduser(os.environ.get("JUDGE_CMD", "judge-cli"))   # e.g
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gpt-5.4")
 GENERATOR_MODEL = "claude-opus-4-8"          # the Claude family that authored answers/drafts
 assert_no_self_family(JUDGE_MODEL, GENERATOR_MODEL)
+
+
+def judge_available():
+    return shutil.which(JUDGE_CMD) is not None
+
+
+def _is_auth_payment_error(out):
+    return bool(re.search(r"payment|api key required|quota exceeded|billing", out, re.I))
+
+
+_sentinel_warned = False
+
+
+def _unscored(kind, reason):
+    rec = {"unscored": True, "reason": reason}
+    if kind == "match":
+        rec["match"] = None
+    elif kind == "winner":
+        rec["winner"] = None
+    return rec
+
+
+def is_unscored(verdict):
+    return (isinstance(verdict, dict)
+            and (verdict.get("unscored") is True
+                 or ("match" in verdict and verdict["match"] is None)
+                 or ("winner" in verdict and verdict["winner"] is None)))
+
+
+def _warn_sentinel_once(reason):
+    global _sentinel_warned
+    if not _sentinel_warned:
+        print(f"[judge_adapter] JUDGE_CMD={JUDGE_CMD!r} unavailable/malformed — degrading to an "
+              f"unscored sentinel ({reason}; no crash, but this item is NOT judged)",
+              file=sys.stderr)
+        _sentinel_warned = True
+
 
 _JSON_RE = re.compile(r"\{[^{}]*\}")
 
@@ -31,7 +70,7 @@ def _call(prompt, retries=3, timeout=180):
             p = subprocess.run([JUDGE_CMD, "-z", prompt, "-m", JUDGE_MODEL],
                                capture_output=True, text=True, timeout=timeout)
             out = (p.stdout or "") + (p.stderr or "")
-            if re.search(r"payment|api key required|quota exceeded|billing", out, re.I):
+            if _is_auth_payment_error(out):
                 raise RuntimeError(f"AUTH/PAYMENT prompt from the judge CLI — STOP, do not fall back: {out[:200]}")
             for m in reversed(_JSON_RE.findall(out)):       # last JSON object wins
                 try:
@@ -41,6 +80,8 @@ def _call(prompt, retries=3, timeout=180):
             last = f"no parseable JSON in: {out[-200:]}"
         except subprocess.TimeoutExpired:
             last = f"timeout {timeout}s"
+        except (FileNotFoundError, OSError) as e:
+            raise RuntimeError(f"judge CLI not executable ({JUDGE_CMD}): {e}") from e
         time.sleep((2 ** attempt) * 5)
     raise RuntimeError(f"judge call failed after {retries} attempts: {last}")
 
@@ -69,14 +110,27 @@ def score_match(question, candidate, gold, key=None, ckpt=None):
         done = load_checkpoint(ckpt)
         if key in done:
             return done[key]["verdict"], 0.0
+    if not judge_available():
+        reason = "judge_cmd_not_found"
+        _warn_sentinel_once(reason)
+        return _unscored("match", reason), 0.0
     prompt = (f'You are a strict evaluation judge. Question: "{question}" '
               f'Gold answer: "{gold}". Candidate answer: "{candidate}". '
               f'Does the candidate convey the same answer as the gold (semantically, '
               f'ignoring phrasing)? Reply with ONLY compact JSON: '
               f'{{"match": true|false, "confidence": 0.0-1.0}}')
-    verdict, lat = _call(prompt)
+    try:
+        verdict, lat = _call(prompt)
+    except RuntimeError as e:
+        if str(e).startswith("AUTH/PAYMENT"):
+            raise
+        reason = f"judge_malfunction:{e}"
+        _warn_sentinel_once(reason)
+        return _unscored("match", reason), 0.0
     if not isinstance(verdict.get("match"), bool):
-        raise RuntimeError(f"malformed verdict: {verdict}")
+        reason = f"malformed_match_verdict:{verdict}"
+        _warn_sentinel_once(reason)
+        return _unscored("match", reason), 0.0
     if ckpt and key:
         _checkpoint(ckpt, key, verdict, lat)
     return verdict, lat
@@ -89,21 +143,38 @@ def judge_pair(question, first, second, key=None, ckpt=None):
         done = load_checkpoint(ckpt)
         if key in done:
             return done[key]["verdict"], 0.0
+    if not judge_available():
+        reason = "judge_cmd_not_found"
+        _warn_sentinel_once(reason)
+        return _unscored("winner", reason), 0.0
     prompt = (f'You are a strict evaluation judge. Question: "{question}" '
               f'Answer A: "{first}" Answer B: "{second}". '
               f'Which answer is more correct and complete? Reply ONLY compact JSON: '
               f'{{"winner": "first"|"second"}}')
-    verdict, lat = _call(prompt)
+    try:
+        verdict, lat = _call(prompt)
+    except RuntimeError as e:
+        if str(e).startswith("AUTH/PAYMENT"):
+            raise
+        reason = f"judge_malfunction:{e}"
+        _warn_sentinel_once(reason)
+        return _unscored("winner", reason), 0.0
     if verdict.get("winner") not in ("first", "second"):
-        raise RuntimeError(f"malformed pair verdict: {verdict}")
+        reason = f"malformed_pair_verdict:{verdict}"
+        _warn_sentinel_once(reason)
+        return _unscored("winner", reason), 0.0
     if ckpt and key:
         _checkpoint(ckpt, key, verdict, lat)
     return verdict, lat
 
 
 def smoke():
-    """CAL-1 acceptance: 1 real call parses + checkpoint round-trips."""
-    import sys
+    """CAL-1 acceptance: 1 real call parses + checkpoint round-trips.
+    Degrades to CAL1_SKIP (exit 0) when the judge CLI isn't installed — no crash."""
+    if not judge_available():
+        print(f"[smoke]   JUDGE_CMD={JUDGE_CMD!r} not found — skipping the real judge call")
+        print("CAL1_SKIP")
+        return
     ck = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cal1_smoke.jsonl")
     if os.path.exists(ck):
         os.remove(ck)

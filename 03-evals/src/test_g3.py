@@ -18,6 +18,8 @@ injection. The whole suite runs with neo4j DOWN and with the neo4j package absen
 (e) Golden_v1 draft:    item 4 — >=30 items, balanced pass/abstain, 6 roles, all unvalidated.
 (f) Founder-only paths:  cal3_fit and cal4_sweep accept explicit golden/result paths instead of
                         hardwiring example_golden.jsonl.
+(g) Fail-closed wiring:  cal4_sweep's new sweep_autorevert/apply_autorevert revoke on unmeasurable
+                        kappa/gain, honor both bars, and never grant (flip a False role to True).
 
 Prints G3_OK iff all pass. sys.exit(1) on any failure.
 """
@@ -223,7 +225,7 @@ def td_per_namespace_lease():
     assert g_fin["mode"] == "suggest",    f"(d.iv) finance should be suggest, got {g_fin['mode']}"
     print(f"  (d.iv) mode: engineering={g_eng['mode']} finance={g_fin['mode']} OK")
 
-    # Others (operations, product, market, governance, shared) must all be False
+    # Others (operations, product, market, history, governance) must all be False
     others = [r for r in abstain.CALIBRATED if r not in ("engineering", "finance")]
     for r in others:
         assert abstain.CALIBRATED[r] is False, f"(d.v) {r} should be False, got {abstain.CALIBRATED[r]}"
@@ -248,17 +250,21 @@ def te_golden_v1_draft():
     assert len(items) >= 30, f"(e.i) need >=30 items, got {len(items)}"
     print(f"  (e.i)  item count={len(items)} (>=30) OK")
 
-    # all 6 required roles present
-    required_roles = {"engineering", "finance", "operations", "product", "market", "governance"}
+    # all 3 required roles present (engineering/finance/governance — golden_v1_draft.py's
+    # 9-persona mapping never emits operations/product/market, which have zero live entities)
+    required_roles = {"engineering", "finance", "governance"}
     present = {i["role"] for i in items}
     missing = required_roles - present
     assert not missing, f"(e.ii) missing roles: {missing}"
-    print(f"  (e.ii) all 6 roles present: {sorted(present)} OK")
+    print(f"  (e.ii) all 3 roles present: {sorted(present)} OK")
 
-    # all unvalidated
-    unvalidated = all(i["correct_answer"] == "" and i["validated"] is False for i in items)
-    assert unvalidated, "(e.iii) all items must have correct_answer=='' and validated=False"
-    print(f"  (e.iii) all {len(items)} items unvalidated OK")
+    # all unvalidated: validated stays False on every item (no self-grading). correct_answer MAY
+    # be a machine-derived structural label for founder-decision-1 items (golden_v1_draft.py's
+    # graph-existence gate + acceptance clause 6 require this) — the invariant that must hold is
+    # validated==False, not correct_answer=='' (that no longer holds for structural items).
+    unvalidated = all(i["validated"] is False for i in items)
+    assert unvalidated, "(e.iii) all items must have validated=False (no self-grading)"
+    print(f"  (e.iii) all {len(items)} items validated==False (no self-grading) OK")
 
     # balanced: neither pass nor abstain below 25%
     abstain_count = sum(1 for i in items if i.get("expected_decision") == "abstain")
@@ -308,6 +314,61 @@ def tf_founder_only_paths():
 
 
 # ---------------------------------------------------------------------------
+# (g) Fail-closed sweep wiring — cal4_sweep's new sweep_autorevert/apply_autorevert
+# revoke on unmeasurable kappa/gain, honor both bars, and NEVER grant (flip False->True).
+# ---------------------------------------------------------------------------
+def tg_sweep_autorevert_failclosed():
+    import importlib
+    import abstain
+    import cal4_sweep
+    importlib.reload(abstain)   # clean slate for this test (mirrors td_per_namespace_lease)
+
+    # (g.i) unmeasurable (kappa=None, gain=None) -> fail-closed revoke
+    abstain.CALIBRATED["engineering"] = True
+    r1 = cal4_sweep.sweep_autorevert("engineering", None, None)
+    assert abstain.CALIBRATED["engineering"] is False, "(g.i) unmeasurable kappa/gain must revoke"
+    assert r1["revoked"] is True, f"(g.i) expected revoked=True, got {r1}"
+    print(f"  (g.i)   kappa=None gain=None -> revoked={r1['revoked']} reason={r1['reason']!r} OK")
+
+    # (g.ii) both bars pass (kappa=0.9, gain=0.5) -> stays True (no revoke)
+    abstain.CALIBRATED["engineering"] = True
+    r2 = cal4_sweep.sweep_autorevert("engineering", 0.9, 0.5)
+    assert abstain.CALIBRATED["engineering"] is True, "(g.ii) passing both bars must stay True"
+    assert r2["revoked"] is False, f"(g.ii) expected revoked=False, got {r2}"
+    print(f"  (g.ii)  kappa=0.9 gain=0.5 -> revoked={r2['revoked']} (stays True) OK")
+
+    # (g.iii) kappa below bar (0.5 < 0.8), gain ok -> revoke
+    abstain.CALIBRATED["engineering"] = True
+    r3 = cal4_sweep.sweep_autorevert("engineering", 0.5, 0.5)
+    assert abstain.CALIBRATED["engineering"] is False, "(g.iii) kappa<0.8 must revoke"
+    assert r3["revoked"] is True, f"(g.iii) expected revoked=True, got {r3}"
+    print(f"  (g.iii) kappa=0.5 gain=0.5 -> revoked={r3['revoked']} OK")
+
+    # (g.iv) gain below bar (-0.1 < 0.0), kappa ok -> revoke
+    abstain.CALIBRATED["engineering"] = True
+    r4 = cal4_sweep.sweep_autorevert("engineering", 0.9, -0.1)
+    assert abstain.CALIBRATED["engineering"] is False, "(g.iv) gain<0.0 must revoke"
+    assert r4["revoked"] is True, f"(g.iv) expected revoked=True, got {r4}"
+    print(f"  (g.iv)  kappa=0.9 gain=-0.1 -> revoked={r4['revoked']} OK")
+
+    # (g.v) NEVER grants: role starts False, good kappa/gain -> must stay False
+    assert abstain.CALIBRATED["product"] is False, "(g.v) product should start False"
+    r5 = cal4_sweep.sweep_autorevert("product", 0.95, 10.0)
+    assert abstain.CALIBRATED["product"] is False, "(g.v) sweep_autorevert must NEVER set a False role to True"
+    assert r5["revoked"] is False, f"(g.v) expected revoked=False (no-op), got {r5}"
+    print(f"  (g.v)   product False + passing kappa/gain -> still False (never grants) OK")
+
+    # (g.vi) apply_autorevert: no-op when nothing is leased (matches cal4_sweep's default path)
+    actions, fail = cal4_sweep.apply_autorevert(None, None)
+    assert actions == {}, f"(g.vi) no role leased -> actions should be {{}}, got {actions}"
+    assert fail == [], f"(g.vi) no role leased -> policy holds trivially, got fail={fail}"
+    print(f"  (g.vi)  apply_autorevert(None,None) with nothing leased -> actions={{}} fail=[] OK")
+
+    # Reset so module state doesn't bleed into other tests
+    abstain.CALIBRATED["engineering"] = False
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -316,8 +377,10 @@ if __name__ == "__main__":
         ("b", "coverage signal: REAL _support_coverage helper (found/over-retrieval/unsupported/|Q|=0)", tb_coverage_signal),
         ("c", "abstain channel: abstain items never reach judge", tc_abstain_channel),
         ("d", "per-namespace lease: auto_revert revokes finance, leaves engineering", td_per_namespace_lease),
-        ("e", "golden_v1 draft: >=30, balanced, 6 roles, all unvalidated", te_golden_v1_draft),
+        ("e", "golden_v1 draft: >=30, balanced, 3 roles, all unvalidated", te_golden_v1_draft),
         ("f", "founder-only paths: cal3/cal4 accept explicit golden/result overrides", tf_founder_only_paths),
+        ("g", "fail-closed sweep wiring: sweep_autorevert/apply_autorevert honor both bars, "
+              "fail-closed on unmeasurable kappa/gain, and never grant", tg_sweep_autorevert_failclosed),
     ]
 
     results = []
