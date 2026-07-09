@@ -4,7 +4,8 @@ name: ci
 # clean clone, and gate the ingest/write engine + dead-edge instrument against a real Neo4j.
 # NOTE (uti): read-path pure+graph gates ARE now run in the graph job (scope/epist/abstain/gate/
 # stamp/reconcile + recall & retention self-tests). The embedding-backed retrieval demos
-# (embed/ladder-INT2/fuse/sweep/serve-INT3) need a vector seed and are the next increment.
+# (embed/ladder-INT2/fuse/sweep) need a vector seed and are the next increment. serve-INT3
+# (F6: provenance-escaping fail-closed self-test + serve-join wiring, INT3_OK) IS gated below.
 on:
   push:
     branches: [main]
@@ -54,6 +55,12 @@ jobs:
           python tools/check_write_gateway.py | tee /tmp/gateway.log
           grep -q WRITE_GATEWAY_OK /tmp/gateway.log
           grep -q WRITE_IMPORTS_OK /tmp/gateway.log
+      - name: eval acceptance gate (jxn — fold-in of jb5's test_g3 G3_OK [now incl. eval_planner P1-P5 via test h] + judge-absent CAL1_SKIP)
+        run: |
+          python 03-evals/src/test_g3.py | tee /tmp/g3.log
+          grep -q G3_OK /tmp/g3.log
+          JUDGE_CMD=/nonexistent/bin/judge python 03-evals/src/judge_adapter.py | tee /tmp/judge.log
+          grep -q CAL1_SKIP /tmp/judge.log
 
   graph:
     # Real Neo4j. Gates the ingest/write engine + invariant backstops: seed schema -> spine ingest
@@ -143,3 +150,20 @@ jobs:
         run: |
           python 01-context/src/rollback.py --selftest | tee /tmp/rollback.log
           grep -q ROLLBACK_OK /tmp/rollback.log
+      - name: G1 eval gates (jxn — eval_planner PLANNER_TESTS_OK+PLANNER_OK; eval_corrective CORRECTIVE_OK)
+        run: |
+          python 03-evals/src/eval_planner.py | tee /tmp/eval_planner.log
+          grep -q PLANNER_TESTS_OK /tmp/eval_planner.log
+          grep -q PLANNER_OK /tmp/eval_planner.log
+          python 03-evals/src/eval_corrective.py | tee /tmp/eval_corrective.log
+          grep -q CORRECTIVE_OK /tmp/eval_corrective.log
+      - name: G1 agent gates (jxn — demo_agent DEMO_AGENT_OK; stage-mcp selftest STAGE_MCP_OK)
+        run: |
+          python 02-agents/src/demo_agent.py | tee /tmp/demo_agent.log
+          grep -q DEMO_AGENT_OK /tmp/demo_agent.log
+          BG_MCP_ROLE=engineering BG_STAGE_NS=engineering python 02-agents/src/selftest_stage_mcp.py | tee /tmp/stage_mcp.log
+          grep -q STAGE_MCP_OK /tmp/stage_mcp.log
+      - name: serve-INT3 gate (F6 — provenance-escaping fail-closed self-test, _src_class default + forged-tag escape, plus serve-join wiring)
+        run: |
+          python 01-context/src/serve.py demo | tee /tmp/serve_demo.log
+          grep -q INT3_OK /tmp/serve_demo.log

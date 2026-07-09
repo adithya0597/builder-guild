@@ -463,8 +463,11 @@ def _fmt_candidate(c):
         extra += f"  evidence={c['evidence']!r}"
     if c.get("source"):
         extra += f"  source={c['source']!r}"
+    # s_key/rel/o_key are LLM-origin (propose_edge lets an agent set all three) — repr() them for the
+    # same anti-spoof reason as evidence/source above: a crafted key can otherwise fake a column
+    # (e.g. a spoofed "origin=human [approved]" suffix) in the reviewer's approval line.
     return (f"{c['cand_id'][:12]}  {c['status']:<9} ns={c['namespace']:<12} "
-            f"{c['s_key']} -{c['rel']}-> {c['o_key']}  origin={c['origin']}{extra}")
+            f"{c['s_key']!r} -{c['rel']!r}-> {c['o_key']!r}  origin={c['origin']}{extra}")
 
 
 def _cli(argv):

@@ -9,7 +9,7 @@ RAG-pattern coverage (see `01-context/RETRIEVAL.md` + `HYBRID_RETRIEVAL_ARCHITEC
 - **Hybrid RAG** — ✅ shipped (keyword + graph + vector ladder, RRF fusion).
 - **GraphRAG** — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); communities (`01-context/src/communities.py`, per-namespace Leiden, isolation-proven) are now wired into the live `serve()` path as flag-gated, read-only enrichment — default OFF (`include_communities=False` / `SERVE_INCLUDE_COMMUNITIES=1` env override), community authority (0.2) kept below graph (1.0) in `01-context/src/epist.py`'s `DEFAULT_AUTHORITY` (builder-guild-o46).
 - **Corrective RAG** — ✅ shipped; corrective_serve() exists but is NOT the default serve() path (it wraps serve()) (`01-context/src/corrective.py`, bounded rewrite→re-retrieve + $0-or-STOP web fallback).
-- **Agentic RAG** — ◐ PARTIAL (mechanism only) → gap **G1** below.
+- **Agentic RAG** — ✅ built + self-test verified 2026-07-07 (this branch; lands with this commit); `02-agents/src/planner.py` self-chooses ≥2 distinct retrievals and terminates on a bounded confidence/abstain signal, isolation-clean (`03-evals/src/eval_planner.py`, self-test prints `PLANNER_OK`); CI-gated (`.github/workflows/ci.yml` graph job prints `PLANNER_TESTS_OK`/`PLANNER_OK`/`DEMO_AGENT_OK`/`STAGE_MCP_OK`); agent-callable via the stage-scoped MCP surface's `plan_context` tool (`02-agents/src/mcp_stage_server.py`, self-test prints `STAGE_MCP_OK`) — output stays suggest-only, the action gate/`CALIBRATED` lease is unchanged and G1 is orthogonal to G3 (builder-guild-087, builder-guild-x40, builder-guild-jxn).
 - **Multimodal RAG** — ◐ PARTIAL: OCR adapter + ETL ingest exist (`01-context/src/ocr_adapter.py`, `etl.ingest_ocr_doc` at `01-context/src/etl.py:154-176`, eval harness `03-evals/src/eval_ocr.py`) but ETL-only — not reachable from live `serve()` → gap **G2** below.
 - **Ingest-time staging gate** (builder-guild-7mg) — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); `:Candidate` staging with `approve()`/`reject()`/`promote()`, where `promote()` materializes THROUGH `mutate.apply_edge` (the sole edge-write gateway); the `origin='llm'` entrypoint `stage_llm()` holds no reference to `apply_edge`, so an LLM extraction is structurally unable to write a fact directly (`01-context/src/staging.py`, self-test prints `STAGING_OK`). Extended 2026-07-03 (this branch): optional `evidence`/`source` review-surface fields on `:Candidate` — surfaced to the approver, structurally excluded from the promoted graph edge (builder-guild-4sb); `promote()`'s status flip is now a compare-and-set that RAISES on a lost race, rolling back the edge write — concurrency-proven by `01-context/src/staging_race_test.py` (prints `STAGING_RACE_OK`, wired into CI; builder-guild-485).
 - **Session-history ingest** (builder-guild-22w) — ✅ built + self-test verified 2026-07-02 (this branch; lands with this commit); real `~/.engram/engram.db` observations + `.explore/source-ledger.jsonl` ingested into the `history` namespace via `mutate.apply_edge` (`PART_OF`), embedded, and retrievable through `serve()` (`01-context/src/etl_history.py`, self-test prints `HISTORY_INGEST_OK` + `HISTORY_SERVE_OK`). Extended 2026-07-03 (this branch): third source — `~/.claude-mem/claude-mem.db` observations (project label `buffalo`, env `CLAUDE_MEM_DB`) under a collision-proof `cmobs:<id>` key scheme, same gateway/idempotency/dead-letter/resume-embed discipline (builder-guild-br7).
@@ -31,8 +31,13 @@ judge easy-set). Guarded by `test_g3.py:130-181` (`tc_abstain_channel`, prints `
 
 ## Near
 
-1. **Temporal-evidence layer.** ◐ PARTIAL — `as_of` exists on `node_card()` only (`01-context/src/serve.py:19-39`); `serve()` itself (`serve.py:122`) takes no `as_of` param, and `node_card()` has exactly one caller in the file — the CLI fallback (`serve.py:746`). Remaining gap: thread `as_of` through `serve()` so
-   "who owned X on <date>" is answered from evidence or abstained — never from current state.
+1. **Temporal-evidence layer.** ✅ `as_of` threads end-to-end through `serve()`
+   (`01-context/src/serve.py:175-176`, landed run-4 commit `412d49b`) as well as `node_card()`
+   (`serve.py:19-39`). Remaining gap: MCP exposure — `02-agents/src/mcp_server.py`'s
+   `query_context` tool does not accept/forward `as_of` (only its `node_card` tool does), so
+   "who owned X on <date>" is answerable in-process but not yet over the read-only MCP surface.
+   Deferred per run-6 disposition (YAGNI for G1 completion; see `.buildloop/specs/run6-plan.json`
+   open_questions).
    *Accept:* the temporal golden item flips from abstain-expected to pass-with-evidence and a
    planted supersession chain answers correctly at three time points.
 2. **Real sufficiency signal.** Replace the facts-count proxy (which fitted with a *negative*
@@ -66,16 +71,11 @@ judge easy-set). Guarded by `test_g3.py:130-181` (`tc_abstain_channel`, prints `
 The three named gaps from the 2026-06-14 status review, written so a cold session can pick one up.
 Each says where to start. G3 is the existing items 2→5 in dependency order (framed, not duplicated).
 
-### G1 — Agentic RAG: the autonomous planner-loop (mechanism shipped, policy deferred)
-Today the retrieve-decision is bounded + mechanical: rung escalation (`ladder.py`) + the corrective
-rewrite loop (`corrective.py`). The Agentic-RAG pattern is a *planner* that decides **what** to
-retrieve, **when**, and **from where**, looping until confident — the policy was deliberately
-deferred (mechanism exists, autonomy of the loop does not). Distinct from item 8 (fleet/multi-agent
-coordination); G1 is one agent choosing its own retrieval strategy.
-*Start:* `02-agents/AGENT_ARCHITECTURE.md` §5 (`demo_agent`) + `01-context/src/corrective.py`.
-*Accept:* a planner answers a multi-step question by issuing ≥2 distinct retrievals it chose itself
-(not the fixed ladder), terminates on a confidence/abstain signal (bounded — no unbounded loop),
-and the trace shows each decision point. Stays $0/local + namespace-scoped (isolation self-check clean).
+### G1 — Agentic RAG: the autonomous planner-loop — CLOSED
+Closed this run (builder-guild-087/x40/jxn) — see the Status section above for the full citation
+(`planner.py` + `eval_planner.py`, `PLANNER_OK`, CI-gated, agent-callable via `mcp_stage_server.py`'s
+`plan_context`). Distinct from item 8 (fleet/multi-agent coordination) — G1 was one agent choosing
+its own retrieval strategy; it stays suggest-only, no autonomy grant, orthogonal to the G3 lease.
 
 ### G2 — Multimodal RAG (OCR-first, NOT vision-default)
 ETL-only today: `ocr_adapter.py` + `etl.ingest_ocr_doc` (`etl.py:154-176`) + `03-evals/src/eval_ocr.py`

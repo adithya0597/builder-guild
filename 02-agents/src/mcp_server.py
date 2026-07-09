@@ -3,7 +3,7 @@
 Role is bound server-side from BG_MCP_ROLE at process start; no tool below accepts a
 role/namespace parameter, so a client-supplied one has no field to land in and is
 silently dropped by FastMCP's generated (pydantic) input schema. This is the
-confidentiality bright line from serve.py:129-130 — role must never come from the
+confidentiality bright line from serve.py:197-198 — role must never come from the
 caller. Zero write-capable tools: every tool below only ever reads.
 
 Run under the 01-context venv, e.g.:

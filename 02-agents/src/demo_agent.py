@@ -1,7 +1,7 @@
 """The smallest correct agent: consume governed context, never own it.
 
 Asks through serve() (the ONLY read path), acts only via the gate's decision, records an
-action-audit row. Run with PYTHONPATH including 01-context/src and 02-agents/src, against the
+action-audit row. Run with PYTHONPATH including 01-context/src, 02-agents/src, 03-evals/src, against the
 demo graph (01-context/src/etl.py). Prints DEMO_AGENT_OK.
 """
 import os
@@ -9,9 +9,12 @@ import sys
 # ox5: make the script self-contained — serve lives in 01-context/src; fix_decision/planner in 02-agents/src
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "01-context", "src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 02-agents/src (fix_decision, planner)
-from serve import serve
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "03-evals", "src"))  # eval_planner's oz4 fixture
+from neo4j import GraphDatabase
+from serve import serve, URI, AUTH
 from fix_decision import record_decision, attach_outcome
 from planner import plan
+from eval_planner import _seed_fixture, _cleanup_fixture   # oz4 reuse — zero `mutate.` in this file
 
 
 def agent_step(question, role, action=None):
@@ -49,9 +52,19 @@ def demo():
 
     # 4) planner loop: a multi-step question must self-choose >=2 distinct retrievals AND
     #    actually ANSWER (genuine-answer gate, same as eval_planner.py demo) — not just stop.
-    #    "SPI-3 blocking SPI-6" is verified-live: abstain (SPI-6) -> id_extract -> pass with
-    #    ASSIGNED_TO -> agent:cto. distinct>=2 + a non-abstain terminal alone is insufficient.
-    rp = plan("SPI-3 blocking SPI-6", "engineering", max_steps=4)
+    #    Self-seeds/tears-down its OWN transient 2-hop via eval_planner's oz4 fixture helpers
+    #    (mirrors eval_planner.demo(), eval_planner.py:390-397, exactly): the live ACME graph has
+    #    0 SPI-* nodes, so a bare plan() call with no seeding always abstains. Reusing the proven
+    #    fixture (not re-deriving it) is also what keeps this file free of any `mutate.` reference.
+    QUESTION = "what blocks SPI-6 and who is it assigned to"
+    drv = GraphDatabase.driver(URI, auth=AUTH)
+    try:
+        _cleanup_fixture(drv)              # drop any stale prior fixture first
+        _seed_fixture(drv)                 # oz4 self-owned transient 2-hop
+        rp = plan(QUESTION, "engineering", max_steps=4)
+    finally:
+        _cleanup_fixture(drv)              # always tear down, even on assertion error
+        drv.close()
     p = rp["planner"]
     p_final = p["steps"][-1]["confidence_signal"]["decision"] if p["steps"] else "abstain"
     p_iso = all(s["isolation_clean"] for s in p["steps"])

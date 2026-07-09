@@ -20,6 +20,9 @@ injection. The whole suite runs with neo4j DOWN and with the neo4j package absen
                         hardwiring example_golden.jsonl.
 (g) Fail-closed wiring:  cal4_sweep's new sweep_autorevert/apply_autorevert revoke on unmeasurable
                         kappa/gain, honor both bars, and never grant (flip a False role to True).
+(h) G1 CI fold-in:      item h — imports eval_planner and runs its P1-P5 injection suite
+                        (>=2-self-chosen, bounded, signal-driven, isolation-caught, no-op guard)
+                        under this file's own neo4j-package stub; zero live graph needed.
 
 Prints G3_OK iff all pass. sys.exit(1) on any failure.
 """
@@ -369,6 +372,35 @@ def tg_sweep_autorevert_failclosed():
 
 
 # ---------------------------------------------------------------------------
+# (h) eval_planner P1-P5 injection suite — imports the REAL eval_planner module and
+# reuses ITS OWN test functions + _run_test helper (identical shape to this file's own
+# _run_test), executing under THIS file's sys.modules["neo4j"] stub installed above.
+# Closes the G1 CI-gate gap jb5's design explicitly leaves open, at $0: eval_planner's
+# P1-P5 (not demo()) need no live graph — re-verified by direct execution this session
+# (IMPORT_AND_P1_P5_UNDER_STUB_OK). demo() stays a separate, Neo4j-gated ci.yml graph-job
+# step (PLANNER_OK) and is NOT exercised here.
+# ---------------------------------------------------------------------------
+def th_eval_planner_injection():
+    import eval_planner as ep   # same-directory sibling import (03-evals/src); eval_planner
+                                 # does its OWN sys.path inserts for 01-context/src + 02-agents/src
+
+    subtests = [
+        ("P1", ep.p1_multi_step),
+        ("P2", ep.p2_bounded),
+        ("P3", ep.p3_signal_driven),
+        ("P4", ep.p4_isolation_caught),
+        ("P5", ep.p5_no_op_guard),
+    ]
+    failures = []
+    for name, fn in subtests:
+        ok, err = ep._run_test(name, fn)
+        print(f"  (h.{name}) {'OK' if ok else 'FAIL: ' + str(err)}")
+        if not ok:
+            failures.append(f"{name}: {err}")
+    assert not failures, f"(h) eval_planner P1-P5 failed: {failures}"
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -381,6 +413,8 @@ if __name__ == "__main__":
         ("f", "founder-only paths: cal3/cal4 accept explicit golden/result overrides", tf_founder_only_paths),
         ("g", "fail-closed sweep wiring: sweep_autorevert/apply_autorevert honor both bars, "
               "fail-closed on unmeasurable kappa/gain, and never grant", tg_sweep_autorevert_failclosed),
+        ("h", "eval_planner P1-P5 injection suite (imports eval_planner, runs P1-P5 under this "
+              "file's neo4j-package stub, no live graph)", th_eval_planner_injection),
     ]
 
     results = []

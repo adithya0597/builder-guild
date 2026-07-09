@@ -1,7 +1,7 @@
 """Agentic RAG planner loop (G1).
 
 Interface:
-    plan(question, role, *, max_steps=4, tau=0.5, _serve=None) -> dict
+    plan(question, role, *, max_steps=4, tau=0.5, as_of=None, _serve=None) -> dict
 
 Bounded loop: each step reads the signal from the PRIOR step's serve() result and
 CHOOSES the next retrieval mode based on that signal (agentic core). Reuses
@@ -187,7 +187,7 @@ def _choose_next(question, current_query, current_pattern, step_result, tried):
     return None, None, None, None
 
 
-def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
+def plan(question, role, *, max_steps=4, tau=0.5, as_of=None, _serve=None):
     """Agentic RAG planner loop.
 
     Bounded to max_steps iterations. Each step reads THIS step's signal and
@@ -211,7 +211,7 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
         pk = _probe_key(current_query, current_pattern)
         tried.add(pk)
 
-        r = _serve(current_query, role, pattern=current_pattern)
+        r = _serve(current_query, role, pattern=current_pattern, as_of=as_of)
         final_result = r
 
         # Isolation assert EVERY step. A MISSING trace.isolation is acceptable ONLY for the
