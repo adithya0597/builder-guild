@@ -27,7 +27,9 @@ def judge_available():
 
 
 def _is_auth_payment_error(out):
-    return bool(re.search(r"payment|api key required|quota exceeded|billing", out, re.I))
+    # Match the sibling $0-or-STOP guards (ocr_adapter.py:32, web_fallback_adapter.py:32) so all
+    # three fire on the same signals — "auth" also covers authentication/authorization/unauthorized.
+    return bool(re.search(r"auth|api[ _-]?key|payment|billing|quota", out, re.I))
 
 
 _sentinel_warned = False
@@ -70,14 +72,17 @@ def _call(prompt, retries=3, timeout=180):
             p = subprocess.run([JUDGE_CMD, "-z", prompt, "-m", JUDGE_MODEL],
                                capture_output=True, text=True, timeout=timeout)
             out = (p.stdout or "") + (p.stderr or "")
-            if _is_auth_payment_error(out):
+            if _is_auth_payment_error(out):     # auth/payment STOP takes precedence over returncode
                 raise RuntimeError(f"AUTH/PAYMENT prompt from the judge CLI — STOP, do not fall back: {out[:200]}")
-            for m in reversed(_JSON_RE.findall(out)):       # last JSON object wins
-                try:
-                    return json.loads(m), round(time.time() - t0, 1)
-                except json.JSONDecodeError:
-                    continue
-            last = f"no parseable JSON in: {out[-200:]}"
+            if p.returncode != 0:               # present-but-broken judge: don't trust its stdout as a verdict
+                last = f"nonzero returncode {p.returncode}: {out[-200:]}"
+            else:
+                for m in reversed(_JSON_RE.findall(out)):   # last JSON object wins
+                    try:
+                        return json.loads(m), round(time.time() - t0, 1)
+                    except json.JSONDecodeError:
+                        continue
+                last = f"no parseable JSON in: {out[-200:]}"
         except subprocess.TimeoutExpired:
             last = f"timeout {timeout}s"
         except (FileNotFoundError, OSError) as e:
@@ -193,5 +198,30 @@ def smoke():
         print(f"CAL1_FAIL: call={ok_call} resume={ok_resume}"); sys.exit(1)
 
 
+def _selftest_stop():
+    """Pure-function STOP-contract guard — runs even on the CAL1_SKIP path (judge absent), so CI's
+    `JUDGE_CMD=/nonexistent ... judge_adapter.py` smoke job enforces both holes for free.
+    (bead 9if only tested the 4 phrasings the old regex already matched, never the contract.)"""
+    for s in ("authentication required", "unauthorized 401", "api key required",
+              "payment", "quota exceeded", "billing"):
+        assert _is_auth_payment_error(s), f"auth-STOP regex missed {s!r} — would degrade to a sentinel"
+    assert not _is_auth_payment_error('{"match": true}'), "auth-STOP regex false-positive on a clean verdict"
+
+    # defect 2: a present-but-broken judge (returncode!=0) with parseable stdout must NOT be trusted.
+    orig_run, orig_sleep = subprocess.run, time.sleep
+    subprocess.run = lambda *a, **k: subprocess.CompletedProcess(a, 1, '{"match": true}', "")
+    time.sleep = lambda *a, **k: None
+    try:
+        broke = False
+        try:
+            _call("x", retries=1)
+        except RuntimeError:
+            broke = True
+        assert broke, "broken judge (returncode=1) accepted as a real verdict"
+    finally:
+        subprocess.run, time.sleep = orig_run, orig_sleep
+
+
 if __name__ == "__main__":
+    _selftest_stop()
     smoke()
