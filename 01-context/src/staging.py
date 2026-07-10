@@ -45,34 +45,36 @@ def _cand_id(ns, s_key, rel, o_key, origin):
     return hashlib.sha1(payload.encode()).hexdigest()
 
 
-def stage(session, s_key, rel, o_key, ns, origin, now, ep=None, evidence=None, source=None):
+def stage(session, s_key, rel, o_key, ns, origin, now, ep=None, evidence=None, source=None, batch_id=None):
     """Stage ONE candidate as a :Candidate node (no edge, no :Entity). status/staged_at are set
     ON CREATE only -> a re-stage of the same (ns,s,rel,o,origin) is idempotent and never resets an
     already-reviewed candidate. evidence/source are optional review-surface metadata (rationale text
     + a source ref); None -> the Cypher SET writes null, which removes the property (same idiom as
-    ep). Returns the deterministic cand_id."""
+    ep). batch_id is optional per-call grouping metadata (same null->absent idiom); default None ->
+    zero behavior change for existing callers. Returns the deterministic cand_id."""
     cid = _cand_id(ns, s_key, rel, o_key, origin)
     session.execute_write(lambda tx: tx.run(
         "MERGE (c:Candidate {cand_id:$id}) "
         "ON CREATE SET c.status='pending', c.s_key=$s, c.rel=$rel, c.o_key=$o, "
         "              c.namespace=$ns, c.origin=$origin, c.ep=$ep, c.staged_at=datetime($now), "
-        "              c.evidence=$evidence, c.source=$source",
+        "              c.evidence=$evidence, c.source=$source, c.batch_id=$batch_id",
         id=cid, s=s_key, rel=rel, o=o_key, ns=ns, origin=origin, ep=ep, now=now,
-        evidence=evidence, source=source))
+        evidence=evidence, source=source, batch_id=batch_id))
     return cid
 
 
-def stage_llm(session, edges, now):
+def stage_llm(session, edges, now, batch_id=None):
     """The origin='llm' ingest entrypoint that can ONLY stage. Takes pre-built edge tuples
     (s_key, rel, o_key, ns), (s_key, rel, o_key, ns, ep), or (s_key, rel, o_key, ns, ep, evidence,
     source) and loops stage(..., origin='llm'). Holds NO reference to mutate.apply_edge ->
-    structurally unable to direct-write an edge."""
+    structurally unable to direct-write an edge. batch_id (optional, default None) is applied to
+    EVERY edge in this call -> the whole extraction run shares one batch_id."""
     ids = []
     for e in edges:
         ep = e[4] if len(e) > 4 else None
         evidence = e[5] if len(e) > 5 else None
         source = e[6] if len(e) > 6 else None
-        ids.append(stage(session, e[0], e[1], e[2], e[3], "llm", now, ep, evidence, source))
+        ids.append(stage(session, e[0], e[1], e[2], e[3], "llm", now, ep, evidence, source, batch_id))
     return ids
 
 
@@ -194,16 +196,66 @@ def promote(session, cand_id, now):
     return session.execute_write(_work)
 
 
-def list_candidates(session, status=None):
-    """Deterministic listing (ORDER BY cand_id), optionally filtered to one status."""
+def list_candidates(session, status=None, batch_id=None):
+    """Deterministic listing (ORDER BY cand_id), optionally filtered to one status and/or one
+    batch_id (composable — both filters apply together when both are given)."""
     def _read(tx):
-        q = ("MATCH (c:Candidate) " + ("WHERE c.status=$status " if status else "") +
+        clauses = []
+        if status:
+            clauses.append("c.status=$status")
+        if batch_id:
+            clauses.append("c.batch_id=$batch_id")
+        where = ("WHERE " + " AND ".join(clauses) + " ") if clauses else ""
+        q = ("MATCH (c:Candidate) " + where +
              "RETURN c.cand_id AS cand_id, c.status AS status, c.s_key AS s_key, c.rel AS rel, "
              "       c.o_key AS o_key, c.namespace AS namespace, c.origin AS origin, "
              "       c.staged_at AS staged_at, c.review_reason AS review_reason, "
              "       c.evidence AS evidence, c.source AS source ORDER BY c.cand_id")
-        return [dict(r) for r in tx.run(q, status=status)]
+        return [dict(r) for r in tx.run(q, status=status, batch_id=batch_id)]
     return session.execute_read(_read)
+
+
+# ── batch ops: thin loops over the EXISTING per-candidate CAS-locked approve/reject/promote — no
+#    new locking primitive, no new edge-write path. A per-candidate ValueError (wrong-state / lost
+#    race) is collected as an error entry, never aborting the rest of the batch (etl dead-letter
+#    idiom) ──────────────────────────────────────────────────────────────────────────────────────
+def batch_approve(session, batch_id, now):
+    if not batch_id:
+        raise ValueError("batch_approve: empty batch_id would operate graph-wide; refusing")
+    results = {}
+    for c in list_candidates(session, batch_id=batch_id):
+        try:
+            approve(session, c["cand_id"], now)
+            results[c["cand_id"]] = "ok"
+        except ValueError as e:
+            results[c["cand_id"]] = f"error: {e}"
+    return results
+
+
+def batch_reject(session, batch_id, now, reason):
+    if not batch_id:
+        raise ValueError("batch_reject: empty batch_id would operate graph-wide; refusing")
+    results = {}
+    for c in list_candidates(session, batch_id=batch_id):
+        try:
+            reject(session, c["cand_id"], reason, now)
+            results[c["cand_id"]] = "ok"
+        except ValueError as e:
+            results[c["cand_id"]] = f"error: {e}"
+    return results
+
+
+def batch_promote(session, batch_id, now):
+    if not batch_id:
+        raise ValueError("batch_promote: empty batch_id would operate graph-wide; refusing")
+    results = {}
+    for c in list_candidates(session, batch_id=batch_id):
+        try:
+            promote(session, c["cand_id"], now)
+            results[c["cand_id"]] = "ok"
+        except ValueError as e:
+            results[c["cand_id"]] = f"error: {e}"
+    return results
 
 
 # ── selftest read helpers (plain RELATES_TO MATCH reads — no write verb near the pattern, so the
@@ -448,6 +500,87 @@ def _selftest():
     print("STAGING_OK")
 
 
+def _selftest_batch():
+    """Proves the batch surface (acceptance builder-guild-w6j) in its own self-cleaning namespace."""
+    SNS = "_staging_selftest_batch"
+    REL = "ASSIGNED_TO"
+    SUBJ = "issue:BATCH-1"
+    now = "2026-07-09T00:00:00Z"
+    fail = []
+    with GraphDatabase.driver(URI, auth=AUTH) as drv:
+        drv.verify_connectivity()
+        with drv.session() as s:
+            try:
+                _clean(s, SNS)
+                s.execute_write(lambda tx: mutate.resolve_entity(
+                    tx, "Issue", SUBJ, now, SNS, short=SUBJ, long_=SUBJ, ep="stg-ep"))
+
+                b1a = stage(s, SUBJ, REL, "agent:BATCH-A", SNS, "human", now, batch_id="b1")
+                b1b = stage(s, SUBJ, REL, "agent:BATCH-B", SNS, "human", now, batch_id="b1")
+                b2a = stage(s, SUBJ, REL, "agent:BATCH-C", SNS, "human", now, batch_id="b2")
+                no_batch = stage(s, SUBJ, REL, "agent:BATCH-D", SNS, "human", now)
+
+                # batch filter is exact -> exactly the 2 'b1' candidates, none of 'b2' or no-batch
+                lc_b1 = list_candidates(s, batch_id="b1")
+                fail += [] if {c["cand_id"] for c in lc_b1} == {b1a, b1b} \
+                    else [("list_candidates(batch_id='b1') wrong set", [c["cand_id"] for c in lc_b1])]
+
+                # no-batch candidate carries no batch_id property at all (null -> absent, same idiom as ep)
+                nb = s.execute_read(lambda tx: _get(tx, no_batch))
+                fail += [] if "batch_id" not in nb else [("no-batch candidate got a batch_id property", nb.get("batch_id"))]
+
+                # list_candidates() with no filter still returns everything staged above
+                all_ids = {c["cand_id"] for c in list_candidates(s) if c["namespace"] == SNS}
+                fail += [] if {b1a, b1b, b2a, no_batch} <= all_ids \
+                    else [("list_candidates(no filter) missing candidates", all_ids)]
+
+                # a 3rd 'b1' candidate already in a terminal state ('rejected') before batch_approve runs
+                b1c = stage(s, SUBJ, REL, "agent:BATCH-E", SNS, "human", now, batch_id="b1")
+                reject(s, b1c, "pre-rejected-for-batch-test", now)
+
+                results = batch_approve(s, "b1", now)
+                b1a_st = s.execute_read(lambda tx: _get(tx, b1a))["status"]
+                b1b_st = s.execute_read(lambda tx: _get(tx, b1b))["status"]
+                b1c_st = s.execute_read(lambda tx: _get(tx, b1c))["status"]
+                fail += [] if (results.get(b1a) == "ok" and results.get(b1b) == "ok"
+                               and str(results.get(b1c, "")).startswith("error")
+                               and b1a_st == "approved" and b1b_st == "approved" and b1c_st == "rejected") \
+                    else [("batch_approve did not approve both + error on terminal candidate",
+                           results, b1a_st, b1b_st, b1c_st)]
+
+                # batch_reject: thin loop over reject() too, same collected-errors contract
+                r1 = stage(s, SUBJ, REL, "agent:BATCH-F", SNS, "human", now, batch_id="b3")
+                rresults = batch_reject(s, "b3", now, "batch-reject-reason")
+                r1_c = s.execute_read(lambda tx: _get(tx, r1))
+                fail += [] if (rresults.get(r1) == "ok" and r1_c["status"] == "rejected"
+                               and r1_c["review_reason"] == "batch-reject-reason") \
+                    else [("batch_reject did not reject via existing reject()", rresults, r1_c)]
+
+                # batch_promote: thin loop over promote() -> materializes an edge through apply_edge
+                s.execute_write(lambda tx: mutate.resolve_entity(
+                    tx, "Agent", "agent:BATCH-G", now, SNS, short="agent:BATCH-G", long_="agent:BATCH-G", ep="stg-ep"))
+                p1 = stage(s, SUBJ, "HAS_STATUS", "agent:BATCH-G", SNS, "human", now, batch_id="b4")
+                approve(s, p1, now)
+                presults = batch_promote(s, "b4", now)
+                st = s.execute_read(lambda tx: mutate.edge_state(tx, SUBJ, "HAS_STATUS", "agent:BATCH-G", SNS))
+                fail += [] if (presults.get(p1) == "ok" and st is True) \
+                    else [("batch_promote did not materialize the edge via existing promote()", presults, st)]
+                # empty batch_id must refuse rather than operate graph-wide (bead c7u-style guard)
+                for op, args in ((batch_approve, (now,)), (batch_reject, (now, "x")), (batch_promote, (now,))):
+                    for bad in (None, ""):
+                        try:
+                            op(s, bad, *args)
+                            fail.append((f"{op.__name__}(batch_id={bad!r}) did not raise",))
+                        except ValueError:
+                            pass
+            finally:
+                _clean(s, SNS)
+    if fail:
+        print("STAGE_BATCH_FAIL:", fail)
+        sys.exit(1)
+    print("STAGE_BATCH_OK")
+
+
 def _fmt_candidate(c):
     """One aligned, human-scannable line. Namespace is called out explicitly (ns=...) since it's the
     blast-radius signal a reviewer must see before approving — 'shared' means every role reads it
@@ -500,5 +633,6 @@ def _cli(argv):
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         _selftest()
+        _selftest_batch()
     else:
         _cli(sys.argv[1:])

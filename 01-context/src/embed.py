@@ -104,10 +104,12 @@ def _materialize_chunks(tx, key, chunks, kind, now):
         tx.run("MATCH (e:Entity {key:$pkey}) "
                "MERGE (c:Chunk {key:$ckey}) "
                "SET c.parent_key=$pkey, c.namespace=$ns, c.ord=$ord, c.text=$text, "
-               "    c.chunk_kind=$kind, c.embedding=$vec, c.embedded_at=datetime($now) "
+               "    c.chunk_kind=$kind, c.embedding=$vec, c.embedding_model=$model, "
+               "    c.embedded_at=datetime($now) "
                "MERGE (e)-[h:HAS_CHUNK]->(c) "
                "SET h.ord=$ord, h.namespace=$ns",
-               pkey=key, ckey=f"{key}#{ord_}", ns=ns, ord=ord_, text=ctext, kind=kind, vec=cvec, now=now)
+               pkey=key, ckey=f"{key}#{ord_}", ns=ns, ord=ord_, text=ctext, kind=kind, vec=cvec,
+               model=MODEL, now=now)
     return len(chunks)
 
 
@@ -150,7 +152,8 @@ def demo():
                          "RETURN size(n.embedding) AS dim, n.chunk_kind AS kind, size(n.chunks) AS nchunks").single()
             # :Chunk materialization (cf7) — each multi-chunk node gets one indexed :Chunk per chunk
             dchk = s.run("MATCH (:Entity {key:'emb:doc'})-[:HAS_CHUNK]->(c:Chunk) "
-                         "RETURN count(c) AS n, size(collect(c.embedding)[0]) AS dim").single()
+                         "RETURN count(c) AS n, size(collect(c.embedding)[0]) AS dim, "
+                         "collect(DISTINCT c.embedding_model) AS models").single()
             # rung 2 — node-level vector search: prove the written NODE vector is retrievable
             qvec = embed("database connection pool timeout")
             hits = s.run("CALL db.index.vector.queryNodes('node_embedding', 5, $q) "
@@ -186,6 +189,7 @@ def demo():
     fail += [] if dcn == rec["ccount"] and dcn >= 2 else [f"prose :Chunk nodes wrong (got {dcn}, expect chunk_count={rec['ccount']})"]
     fail += [] if ccn == 2 else [f"code :Chunk nodes wrong (got {ccn}, expect 2: connect, Pool)"]
     fail += [] if dchk["n"] == dcn and dchk["dim"] == 768 else ["chunk embedding missing/not 768-dim"]
+    fail += [] if dchk["models"] == [MODEL] else [f"chunk embedding_model stamp wrong: {dchk['models']} != [{MODEL}]"]
     fail += [] if chits and chits[0]["parent"] == "emb:doc" else ["chunk vector search did not retrieve a chunk of emb:doc"]
 
     if fail:

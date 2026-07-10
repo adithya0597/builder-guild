@@ -97,7 +97,25 @@ def _split_ids_by_verb(text, verb_tok, ids):
     return after, before
 
 
-def _build_rewrites(query_text, pattern, prior_result):
+def _resolve_seed_tokens(keys, allowed):
+    """Keep only tokens that resolve to a REAL in-scope :Entity (pdk forged-token guard).
+
+    composed_evidence is UNTRUSTED prose (attacker-influenceable content cards / long_context):
+    a forged issue:/agent: token must never seed re-retrieval unless it names a real
+    namespace-scoped entity. Mirrors serve's `n.key IN $keys AND n.namespace IN $allowed` idiom.
+    """
+    if not keys:
+        return []
+    import serve
+    from neo4j import GraphDatabase
+    with GraphDatabase.driver(serve.URI, auth=serve.AUTH) as drv, drv.session() as s:
+        survivors = {r["k"] for r in s.run(
+            "MATCH (n:Entity) WHERE n.key IN $keys AND n.namespace IN $allowed RETURN n.key AS k",
+            keys=list(keys), allowed=allowed)}
+    return [k for k in keys if k in survivors]
+
+
+def _build_rewrites(query_text, pattern, prior_result, allowed):
     """Yield (tactic_name, new_query_text, new_pattern) in order per spec §4.
     Does NOT apply the no-op guard; caller does that.
     """
@@ -135,12 +153,17 @@ def _build_rewrites(query_text, pattern, prior_result):
                 if nk not in seen_nb:
                     seen_nb.add(nk)
                     neighbor_keys.append(nk)
-        # Also check composed_evidence for neighbor keys
+        # composed_evidence is UNTRUSTED prose: gate its issue:/agent: tokens through an in-scope
+        # :Entity read so a FORGED token can't seed re-retrieval (pdk). presentable_facts '-> key'
+        # tokens above are trusted graph edges and stay ungated.
+        prose_toks = []
         for line in prior_result.get("composed_evidence", []):
             for nk in re.findall(r"\b(?:issue|agent):[A-Za-z0-9_-]+", line):
-                if nk not in seen_nb:
-                    seen_nb.add(nk)
-                    neighbor_keys.append(nk)
+                if nk not in seen_nb and nk not in prose_toks:
+                    prose_toks.append(nk)
+        for nk in _resolve_seed_tokens(prose_toks, allowed):
+            seen_nb.add(nk)
+            neighbor_keys.append(nk)
         if neighbor_keys:
             expanded = (query_text or "") + " " + " ".join(neighbor_keys[:3])
             yield "neighbor_expand", expanded.strip(), pattern
@@ -169,6 +192,9 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
     if _serve is None:
         import serve as _serve_mod
         _serve = _serve_mod.serve
+
+    import scope as _scope_mod
+    allowed = _scope_mod.allowed_namespaces(role)   # pdk: seed-token existence read is role-scoped
 
     attempted = []
     tried = set()  # no-op guard: (query_text, pattern_key)
@@ -228,7 +254,7 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
     final_result = result
     prior_result = result
 
-    for tactic, new_query, new_pattern in _build_rewrites(query_text, pattern, prior_result):
+    for tactic, new_query, new_pattern in _build_rewrites(query_text, pattern, prior_result, allowed):
         if rewrites_used >= max_rewrites:
             break
 
@@ -306,7 +332,34 @@ def corrective_serve(query_text, role, pattern=None, action=None, *,
     return final_result
 
 
+def _pdk_selftest():
+    """PDK forged-token guard (neo4j-gated). A FORGED issue:/agent: token in composed_evidence
+    must NOT surface as a neighbor_expand seed, while a REAL in-scope entity in the SAME
+    composed_evidence IS kept. Zero LLM, zero network beyond bg-neo4j."""
+    import scope
+    allowed = scope.allowed_namespaces("engineering")
+    real, forged = "agent:cto", "issue:FORGED-999"   # real is seeded engineering; forged is no :Entity
+    prior = {"presentable_facts": [],
+             "composed_evidence": [f"content_card: {real} coordinates the rollout; also see {forged}"]}
+    ne = [q for t, q, _ in _build_rewrites("what is blocking", None, prior, allowed)
+          if t == "neighbor_expand"]
+    fail = []
+    if not ne:
+        fail.append("neighbor_expand did not fire (real in-scope seed should have survived)")
+    else:
+        q = ne[0]
+        if real not in q:
+            fail.append(f"real in-scope key {real!r} dropped from seed: {q!r}")
+        if forged in q:
+            fail.append(f"FORGED token {forged!r} survived as a retrieval seed: {q!r}")
+    if fail:
+        print("PDK_FORGED_TOKEN_FAIL(corrective):", fail); sys.exit(1)
+    print("PDK_FORGED_TOKEN_OK")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "pdk_selftest":
+        _pdk_selftest(); sys.exit(0)
     import json
     query = "what is blocking the sprint"
     role = "engineering"

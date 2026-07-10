@@ -57,15 +57,17 @@ def propose_edge(s_key: str, rel: str, o_key: str, evidence: str | None = None,
 
 
 @mcp.tool()
-def plan_context(question: str, max_steps: int = 4) -> dict:
+def plan_context(question: str, max_steps: int = 4, as_of: str | None = None) -> dict:
     """Bounded agentic-RAG planning loop over this server's bound role. Self-chooses
     id_extract/graph_pattern/neighbor_hop/decompose retrieval probes from each step's serve()
     signal. Returns planner.plan()'s full envelope verbatim (serve fields from the terminating step
     + "planner": {steps[], distinct_retrievals, terminated_on, steps_used, max_steps}) — no
-    post-filtering, no gate bypass. max_steps is capped server-side at 8 regardless of the request."""
+    post-filtering, no gate bypass. max_steps is capped server-side at 8 regardless of the request.
+    as_of=None -> current view; as_of=<ISO timestamp> -> point-in-time view (node_card's existing
+    forwarding pattern, mcp_server.py:56)."""
     # floor at 1: planner.plan uses range(1, max_steps+1), which is EMPTY for max_steps<=0 and would
     # return a malformed/empty envelope over MCP. Clamp both ends at the tool boundary.
-    return planner.plan(question, ROLE, max_steps=max(1, min(max_steps, MAX_STEPS_CAP)))
+    return planner.plan(question, ROLE, max_steps=max(1, min(max_steps, MAX_STEPS_CAP)), as_of=as_of)
 
 
 if __name__ == "__main__":

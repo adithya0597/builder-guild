@@ -53,7 +53,8 @@ def _vector_query(s, allowed, qv, k):
     total = s.run("MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) AS c").single()["c"]
     Q = ("CALL db.index.vector.queryNodes('node_embedding', $over, $q) YIELD node, score "
          "WHERE node.namespace IN $allowed "
-         "RETURN node.key AS key, node.namespace AS ns, score ORDER BY score DESC LIMIT $k")
+         "RETURN node.key AS key, node.namespace AS ns, node.embedding_model AS embedding_model, "
+         "       score ORDER BY score DESC LIMIT $k")
     over = k * 5
     while True:
         hits = s.run(Q, q=qv, allowed=allowed, k=k, over=min(over, max(total, 1))).data()
@@ -103,7 +104,7 @@ def _chunk_vector_query(s, allowed, qv, k):
     Q = ("CALL db.index.vector.queryNodes('chunk_embedding', $over, $q) YIELD node, score "
          "WHERE node.namespace IN $allowed "
          "RETURN node.parent_key AS key, node.namespace AS ns, node.key AS chunk_key, "
-         "       score ORDER BY score DESC")
+         "       node.embedding_model AS embedding_model, score ORDER BY score DESC")
     over = k * 5
     while True:
         rows = s.run(Q, q=qv, allowed=allowed, over=min(over, max(total, 1))).data()

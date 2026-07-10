@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import scope
 import staging
+import stamp
 from neo4j import GraphDatabase
 from serve import node_card
 
@@ -32,12 +33,20 @@ EXPECTED_TOOLS = {"plan_context", "propose_edge"}
 # Exact per-tool parameter sets — the mechanical proof that no ns/role/_serve/tau leaked in.
 EXPECTED_SCHEMA = {
     "propose_edge": {"s_key", "rel", "o_key", "evidence", "source"},
-    "plan_context": {"question", "max_steps"},
+    "plan_context": {"question", "max_steps", "as_of"},
 }
 # Test-only fixture key-space: cannot collide with demo_seed's ACME-* graph or staging.py's own
 # STG-* selftest fixture.
 T_SUBJ, T_REL, T_OBJ = "issue:STGMCP-TEST-1", "ASSIGNED_TO", "agent:STGMCP-TEST-BOB"
 TERMINATED_LABELS = {"confidence", "escalate", "confident_abstain", "abstain", "max_steps"}
+
+# Distinct fixture key-space for the as_of behavioral probe (bead 3o0) — separate from T_SUBJ/T_REL/T_OBJ
+# above and from serve.py's own "asofprobe" self-test fixture, so concurrent selftest runs never collide.
+A_ISS, A_REL, A_OLD, A_NEW = ("issue:STGMCP-ASOF-1", "HAS_STATUS",
+                              "status:STGMCP-ASOF-OLD", "status:STGMCP-ASOF-NEW")
+A_NS = "engineering"                                        # matches the session's bound BG_STAGE_NS
+A_T0, A_TB, A_T1 = ("2026-06-04T00:00:00Z", "2026-06-04T00:30:00Z", "2026-06-04T01:00:00Z")  # T0<=TB<T1
+A_OLD_FACT, A_NEW_FACT = f"{A_REL} -> {A_OLD}", f"{A_REL} -> {A_NEW}"
 
 
 def _result_value(result):
@@ -150,6 +159,30 @@ async def _session_cases(fail):
             fail += [] if isinstance(su0, int) and su0 >= 1 else \
                 [f"(d2) max_steps=0 gave malformed envelope: steps_used={su0!r} planner={pl0!r}"]
 
+            # (h) BEHAVIORAL as_of forwarding (bead 3o0): plant a real bi-temporal supersession via
+            # stamp.plant_supersession (the sanctioned mutate-engine fixture serve.py's own self-test
+            # uses), then prove as_of reaches serve() THROUGH plan_context THROUGH the MCP tool
+            # boundary — not just that the param is schema-accepted. max_steps=1 forces the planner's
+            # first (and only) probe to be serve(question, role, as_of=as_of) with no re-aim, so the
+            # terminating result is deterministically the point-in-time query, mirroring serve.py's
+            # own as_of self-test (serve.py:797-825) one layer up through planner.plan + the tool.
+            stamp.plant_supersession(A_ISS, A_REL, A_OLD, A_NEW, A_NS, A_T0, A_T1)
+            try:
+                env_before = await _call(session, "plan_context", {
+                    "question": "STGMCP-ASOF-1", "max_steps": 1, "as_of": A_TB}, fail) or {}
+                env_now = await _call(session, "plan_context", {
+                    "question": "STGMCP-ASOF-1", "max_steps": 1}, fail) or {}
+                pf_b = env_before.get("presentable_facts") or []
+                pf_n = env_now.get("presentable_facts") or []
+                print(f"[asof]    as_of={A_TB} -> {pf_b} | as_of=None(now) -> {pf_n}")
+                fail += [] if (A_OLD_FACT in pf_b and A_NEW_FACT not in pf_b) else \
+                    [f"(h) as_of={A_TB} must surface OLD value only via plan_context: {pf_b}"]
+                fail += [] if (A_NEW_FACT in pf_n and A_OLD_FACT not in pf_n) else \
+                    [f"(h) as_of=None must surface NEW (current) value only via plan_context: {pf_n}"]
+            finally:
+                with GraphDatabase.driver(staging.URI, auth=staging.AUTH) as drv, drv.session() as s:
+                    s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[A_ISS, A_OLD, A_NEW])
+
 
 def _startup_fail(env_overrides, strip_keys, must_mention, label, fail):
     """Spawn the server with a broken env and assert it fails fast (nonzero exit + a stderr message
@@ -178,6 +211,7 @@ async def main():
     if fail:
         print("STAGE_MCP_FAIL:", fail)
         sys.exit(1)
+    print("ASOF_MCP_OK")
     print("STAGE_MCP_OK")
 
 

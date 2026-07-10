@@ -33,13 +33,15 @@ mcp = FastMCP("builder-guild-context")
 
 @mcp.tool()
 def query_context(query_text: str, pattern: dict[str, str] | None = None, deep_serve: bool = False,
-                   rerank: bool = False, include_communities: bool = False) -> dict:
+                   rerank: bool = False, include_communities: bool = False,
+                   as_of: str | None = None) -> dict:
     """Read-only fused graph+vector query. `pattern`, if given, is the structural graph-rung
     filter ladder.graph_rung consumes: a mapping with string keys "rel" (edge name) and "obj"
     (target entity key), e.g. {"rel": "BLOCKS", "obj": "issue:ACME-1"}. Returns the serve()
     envelope verbatim (decision/mode/presentable_facts/provenance/trace, incl.
     trace.gate_abstain) — no post-filtering, no gate bypass. Always runs as this server's
-    bound role."""
+    bound role. as_of=None -> current view; as_of=<ISO timestamp> -> point-in-time view
+    (node_card's existing forwarding pattern)."""
     if isinstance(pattern, str):          # tolerate a JSON-encoded object from lenient clients
         try:
             pattern = json.loads(pattern)
@@ -49,7 +51,7 @@ def query_context(query_text: str, pattern: dict[str, str] | None = None, deep_s
     if pattern is not None and not ({"rel", "obj"} <= pattern.keys()):
         raise ValueError(f"pattern must have 'rel' and 'obj' keys, got: {sorted(pattern)}")
     return _serve(query_text, ROLE, pattern=pattern, deep_serve=deep_serve, rerank=rerank,
-                  include_communities=include_communities)
+                  include_communities=include_communities, as_of=as_of)
 
 
 @mcp.tool()
