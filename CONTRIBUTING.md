@@ -27,6 +27,17 @@ Follow the Quickstart in the [README](README.md). Useful checks:
 
 Keep changes focused and explain the *why*. If you touch a write path, include a determinism check: the same input ingested twice must produce the same graph (idempotency is a core guarantee).
 
+Comment on the issue you're taking before opening a PR, so two people don't duplicate the same work. If a PR already exists for it, work with that author instead of opening a competing one.
+
+## AI-assisted contributions
+
+AI-assisted PRs are welcome — this project is built with AI tools too.
+
+- **Disclosure required.** State the tool and how much of the change it produced in the PR description (an `Assisted-by:` trailer works too).
+- **A human owns every PR.** Commits can be agent-authored; the PR can't be agent-owned — the person submitting it must understand the change without AI help.
+- **Judged on quality and intent, not origin.** Unreviewed, low-effort AI output may be closed without detailed feedback.
+- **Routine use is exempt.** Autocomplete, Q&A, and code-explanation don't need disclosure.
+
 ## Licensing & contributor agreement (please read)
 
 Builder Guild is **dual-licensed**: AGPL-3.0 for everyone, plus a separate commercial license for users who can't accept AGPL's network-copyleft (see [DUAL_LICENSE.md](DUAL_LICENSE.md)).

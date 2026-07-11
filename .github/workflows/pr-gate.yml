@@ -1,0 +1,64 @@
+name: pr-gate
+
+# Post-open check (3hu): does this PR reference an issue, come from someone already
+# trusted with write access, or carry an explicit exemption label? CONTRIBUTING.md asks
+# contributors to open an issue before a PR — this makes that ask visible instead of
+# just requested. Named linked-issue-check, not "gate", because it only runs after a
+# PR already exists; it can't stop one from being opened.
+on:
+  pull_request:
+    types: [opened, edited, reopened, labeled, unlabeled]
+
+permissions:
+  issues: read           # to look up the referenced issue and confirm it isn't a PR
+  pull-requests: read    # only needs to read the PR being checked
+
+jobs:
+  linked-issue-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: check for linked issue, trusted author, or exemption label
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$AUTHOR_ASSOCIATION" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]]; then
+            echo "PASS: author association is $AUTHOR_ASSOCIATION"
+            exit 0
+          fi
+
+          if [[ ",$LABELS," == *",maintainer-exempt,"* ]]; then
+            echo "PASS: labeled maintainer-exempt"
+            exit 0
+          fi
+
+          # Extract every referenced issue number ('#123' or a full .../issues/123 URL) and
+          # verify at least one resolves to a real issue in THIS repo — not a 404, not a PR.
+          # A bare number in the text proves nothing on its own (e.g. "#1" spam); the repo's
+          # own issue tracker is the source of truth.
+          refs=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
+                 | /usr/bin/grep -oE '#[0-9]+|issues/[0-9]+' \
+                 | /usr/bin/grep -oE '[0-9]+' \
+                 | sort -u) || true
+
+          for n in $refs; do
+            if resp=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${n}" 2>/dev/null); then
+              if ! echo "$resp" | jq -e 'has("pull_request")' >/dev/null; then
+                echo "PASS: references issue #$n in $GITHUB_REPOSITORY"
+                exit 0
+              fi
+            fi
+          done
+
+          echo "FAIL: no reference to a real issue in this repo, author isn't a"
+          echo "maintainer/collaborator, and the PR isn't labeled maintainer-exempt."
+          echo "CONTRIBUTING.md asks you to open an issue before a PR so we can agree on the shape"
+          echo "first. Reference an existing issue in the PR title or body (e.g. '#123' or the"
+          echo "full issue URL) — not a PR number — or ask a maintainer to add the"
+          echo "maintainer-exempt label."
+          exit 1

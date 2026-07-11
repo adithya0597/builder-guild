@@ -1,0 +1,20 @@
+# CODEOWNERS — load-bearing: branch protection on main requires code-owner review
+# (enabled 2026-07-11). Every path below routes to the same solo maintainer today,
+# but the file already marks which paths are security-sensitive.
+#
+# WARNING: CODEOWNERS matching is last-match-wins — rules are evaluated top to
+# bottom and the LAST matching pattern wins, not the most specific one. A broad
+# rule added below a narrow one can silently override it. Append new rules with
+# that in mind (OpenClaw's CODEOWNERS carries the same warning for the same reason).
+
+/SECURITY.md                      @adithya0597
+/CONTRIBUTING.md                  @adithya0597
+/GOVERNANCE.md                    @adithya0597
+/.github/workflows/               @adithya0597
+/.github/CODEOWNERS               @adithya0597
+/tools/check_write_gateway.py     @adithya0597
+/01-context/src/abstain.py        @adithya0597
+/01-context/src/mutate.py         @adithya0597
+/01-context/src/staging.py        @adithya0597
+/01-context/src/serve.py          @adithya0597
+/01-context/src/extract.py        @adithya0597
