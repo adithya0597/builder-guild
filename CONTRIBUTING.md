@@ -42,10 +42,10 @@ AI-assisted PRs are welcome — this project is built with AI tools too.
 
 Builder Guild is **dual-licensed**: AGPL-3.0 for everyone, plus a separate commercial license for users who can't accept AGPL's network-copyleft (see [DUAL_LICENSE.md](DUAL_LICENSE.md)).
 
-For the project to keep offering that commercial option, the maintainer must be able to license **all** of the code — including your contribution — under **both** licenses. So contributions require a lightweight **Contributor License Agreement (CLA)**: you keep copyright to your work and grant the maintainer the right to license it under AGPL-3.0 **and** the commercial license.
+For the project to keep offering that commercial option, the maintainer must be able to license **all** of the code — including your contribution — under **both** licenses. So contributions require a lightweight **Contributor License Agreement**: see [CLA.md](CLA.md) — you keep copyright to your work and grant the maintainer the right to license it under AGPL-3.0 **and** the commercial license.
 
 - By opening a PR you agree your contribution is offered under these terms.
-- Signing is a one-time automated check (cla-assistant) that runs on your first PR — sign once and every future PR is covered.
+- Signing is a one-time automated check ([CLA Assistant Lite](https://github.com/contributor-assistant/github-action), via a PR comment) that runs on your first PR — sign once and every future PR is covered.
 - **Don't paste in code you can't relicense** (e.g. GPL-only snippets) — it would break the dual-license guarantee for everyone.
 
 *Not legal advice — the CLA text itself should be finalized with counsel.*
