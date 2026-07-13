@@ -118,6 +118,12 @@ jobs:
           grep -q GUARD_OK /tmp/guard.log
           python tools/run_guard.py --self-test | tee /tmp/guard_st.log
           grep -q GUARD_SELFTEST_OK /tmp/guard_st.log
+      - name: embed demo seed (demo_seed.py — embeds issue:ACME-9 + vector-path demo nodes; without
+          this the vector rung has zero embedded nodes and every RRF-dependent gate downstream
+          silently degrades to keyword-only)
+        run: |
+          python 01-context/src/demo_seed.py | tee /tmp/demo_seed.log
+          grep -q DEMO_SEED_OK /tmp/demo_seed.log
       - name: read-path gates (uti — scope/epist/abstain/gate/stamp/reconcile + recall & retention self-tests)
         run: |
           python 01-context/src/scope.py | tee /tmp/scope.log
