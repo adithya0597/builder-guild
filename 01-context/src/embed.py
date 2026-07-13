@@ -20,7 +20,7 @@ from functools import lru_cache
 from neo4j import GraphDatabase
 
 URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
-MODEL = "google/embeddinggemma-300m"
+MODEL = os.environ.get("BG_EMBED_MODEL", "google/embeddinggemma-300m")
 
 
 @lru_cache(maxsize=1)

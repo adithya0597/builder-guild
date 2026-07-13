@@ -69,6 +69,14 @@ jobs:
     # (scope/epist/abstain/gate/stamp/reconcile + recall & retention self-tests, uti). The
     # embedding-backed retrieval demos (ladder-INT2/serve-INT3/fuse/sweep) are the next increment.
     runs-on: ubuntu-latest
+    env:
+      # google/embeddinggemma-300m (embed.py default) is HF-gated and CI has no HF auth; several
+      # steps below (mcp gate, serve-INT3, G1 agent/eval gates) call serve()'s vector rung
+      # unconditionally on non-empty query text, which loads this model. Pin CI to an ungated
+      # stand-in with the SAME 768-dim output as the schema's hardcoded vector index config
+      # (03_indexes.cypher) so db.index.vector.queryNodes doesn't dimension-mismatch. Local/prod
+      # default (embeddinggemma) is unchanged — only this job's env overrides it.
+      BG_EMBED_MODEL: sentence-transformers/all-mpnet-base-v2
     services:
       neo4j:
         image: neo4j:5.26-community
