@@ -151,11 +151,13 @@ def status_history(tx, key):
 # G2 OCR ingestion path (G2) — ADDITIVE, does not touch fetch_source / ingest
 # ---------------------------------------------------------------------------
 
-def ingest_ocr_doc(session, image_path, namespace, key, ep=None):
-    """OCR a rasterized page image and ingest its text as a graph entity.
+def ingest_ocr_doc(session, image_path, namespace, key, ep=None, now=None):
+    """OCR a rasterized page image and ingest its text as a graph entity, EMBEDDED (G2).
 
     Calls ocr_adapter.extract() -> extracted text -> upsert_entity() with
-    long_context=<ocr text>, namespace=<namespace>, key=<key>.
+    long_context=<ocr text>, namespace=<namespace>, key=<key> -> embed.embed_node()
+    so the node lands with n.embedding set and is reachable from serve()'s vector rung
+    immediately (no dirty=true-then-sweep dependency).
 
     This function is intentionally isolated from the existing fetch_source / ingest
     path: it adds ONE entity node per image, does not create any RELATES_TO edges,
@@ -167,13 +169,64 @@ def ingest_ocr_doc(session, image_path, namespace, key, ep=None):
         namespace:  graph namespace for the new entity (e.g. "engineering")
         key:        graph key for the new entity (e.g. "doc:ocr-spi-42-scan")
         ep:         episodic uuid; defaults to f"ocr:{key}"
+        now:        explicit UTC ISO clock string for the embed freshness stamp;
+                    defaults to the current UTC time (ONTOLOGY §10 prefers an explicit
+                    clock, but ingest_ocr_doc's callers are ad hoc image-drop events,
+                    not a replayable batch, so "now" is a reasonable default here)
     """
     import ocr_adapter
+    import embed
     ep = ep or f"ocr:{key}"
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     ocr_text = ocr_adapter.extract(image_path)
     short = f"OCR document {key}"
-    session.execute_write(lambda tx: upsert_entity(tx, "Document", key, short, ocr_text, ep, ns=namespace))
+    def _upsert_and_embed(tx):
+        upsert_entity(tx, "Document", key, short, ocr_text, ep, ns=namespace)
+        embed.embed_node(tx, key, ocr_text, "prose", now)
+    session.execute_write(_upsert_and_embed)
     return ocr_text
+
+
+def _g2_ocr_serve_selftest():
+    """G2 selftest (neo4j-gated): ocr_adapter.extract monkeypatched to canned text (zero real
+    OCR, zero LLM, zero network beyond bg-neo4j) proves ingest_ocr_doc's embed-at-ingest wiring
+    end-to-end — the node has n.embedding set + n.dirty=false right after ingest, and is
+    RETRIEVED through the REAL serve() ladder (not a manual vector query bypass)."""
+    import ocr_adapter
+    from serve import serve
+
+    key, ns = "doc:g2-ocr-selftest", "engineering"
+    canned_text = "SPI-77 rebase conflict assigned to the CTO agent for review."
+    query = "SPI-77 rebase conflict assigned to the CTO agent"
+    orig_extract = ocr_adapter.extract
+    ocr_adapter.extract = lambda image_path, **kw: canned_text
+
+    def _clean(s):
+        s.execute_write(lambda tx: tx.run("MATCH (n:Entity {key:$k}) DETACH DELETE n", k=key))
+        s.execute_write(lambda tx: tx.run("MATCH (e:Episodic {uuid:$u}) DETACH DELETE e", u=f"ocr:{key}"))
+
+    try:
+        with GraphDatabase.driver(URI, auth=AUTH) as drv:
+            with drv.session() as s:
+                _clean(s)
+                ingest_ocr_doc(s, "/nonexistent-g2-selftest.png", ns, key)
+                rec = s.execute_read(lambda tx: tx.run(
+                    "MATCH (n:Entity {key:$k}) RETURN n.embedding AS emb, n.dirty AS dirty", k=key).single())
+                assert rec["emb"] is not None, "G2: n.embedding is NULL right after ingest_ocr_doc"
+                assert rec["dirty"] is False, f"G2: n.dirty must be false right after ingest, got {rec['dirty']!r}"
+
+            result = serve(query, ns)
+            rt = result.get("trace", {}).get("retrieve", {})
+            retrieved = set(rt.get("keyword", []) or []) | set(rt.get("graph", []) or []) | set(rt.get("vector", []) or [])
+            if result.get("primary"):
+                retrieved.add(result["primary"])
+            assert key in retrieved, f"G2: OCR node {key!r} not retrieved by serve(); retrieve trace={rt}"
+
+            with drv.session() as s:
+                _clean(s)
+        print("G2_OCR_SERVE_OK")
+    finally:
+        ocr_adapter.extract = orig_extract
 
 
 NOW1, NOW2 = "2026-06-14T00:00:00Z", "2026-06-14T01:00:00Z"   # explicit ETL-run clocks (no ambient datetime)
@@ -203,4 +256,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--g2-selftest" in sys.argv:
+        _g2_ocr_serve_selftest()
+    else:
+        main()

@@ -15,7 +15,8 @@ at 3 workers (LABELED-ESTIMATE from 23 s mean).
 
 Outputs cal4_results.json: per-item match medians/percentiles, position-bias delta, easy-case
 agreement, and the discretionary judge-vs-human kappa with its N (=2 -> reported UNMEASURABLE).
-DOES NOT flip CALIBRATED.
+Does not grant leases. Any auto-revert action is process-local evidence for founder review; it
+does not persist a lease rewrite or revoke an already-running serving process.
 
 SERVE-JOIN SCOPE (6gw): like cal3_fit, this sweep runs serve() GRAPH-ONLY (deep_serve OFF) — it
 does not judge the serve-join / deep_serve (PageIndex) path. The serve-join path is validated
@@ -35,7 +36,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 from golden import read_golden
 from serve import serve
-from judge_adapter import score_match, judge_pair, load_checkpoint
+from judge_adapter import score_match, judge_pair, load_checkpoint, is_unscored, judge_available
 from cal3_fit import answer_text, _is_exact_gold
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,6 +62,46 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
+def sweep_autorevert(role, kappa, gain, kappa_bar=0.8, gain_bar=0.0):
+    """Fail-closed, process-local evidence wrapper around abstain.auto_revert.
+
+    Unmeasurable inputs (None/NaN/inf) are revoke-worthy by definition. This mutates only this
+    sweep process's imported abstain.CALIBRATED dict; it does not persist a lease rewrite or revoke
+    any already-running serving process.
+    """
+    import abstain
+    if not (abstain._is_measurable_number(kappa) and abstain._is_measurable_number(gain)):
+        if abstain.CALIBRATED.get(role, False):
+            abstain.CALIBRATED[role] = False
+            return {"role": role, "revoked": True,
+                    "reason": f"kappa={kappa} gain={gain} -> unmeasurable, process-local revoke evidence"}
+        return {"role": role, "revoked": False,
+                "reason": "already False -> no-op (unmeasurable, process-local evidence only)"}
+    return abstain.auto_revert(role, kappa, gain, kappa_bar, gain_bar)
+
+
+def apply_autorevert(kappa, gain, kappa_bar=0.8, gain_bar=0.0):
+    """Run sweep_autorevert over every namespace currently leased in this process.
+
+    This is evidence-only for persisted/live-serving lease state. It never claims to revoke another
+    Python process. Returns (actions, fail): actions is {role: action} for roles that were leased (empty
+    dict when nothing was leased -- the common/default case); fail is a list of founder-policy
+    violation messages (empty = policy holds). Policy: every role must be False unless it passed
+    BOTH bars this sweep -- collapses to 'if anything is still leased, kappa/gain both passed',
+    since kappa/gain are sweep-wide scalars, not per-role."""
+    import abstain
+    actions = {r: sweep_autorevert(r, kappa, gain, kappa_bar, gain_bar)
+               for r, leased in list(abstain.CALIBRATED.items()) if leased}
+    passed_both_bars = (abstain._is_measurable_number(kappa)
+                         and abstain._is_measurable_number(gain)
+                         and kappa >= kappa_bar and gain >= gain_bar)
+    still_leased = [r for r, v in abstain.CALIBRATED.items() if v]
+    fail = [] if (not still_leased or passed_both_bars) else [
+        f"founder policy violated: {still_leased} remain leased without kappa>={kappa_bar} "
+        f"and gain>={gain_bar} (kappa={kappa}, gain={gain})"]
+    return actions, fail
+
+
 def main(argv=None):
     args = parse_args(argv)
     fail = []
@@ -78,18 +119,22 @@ def main(argv=None):
         # Fully deterministic golden: nothing for the judge to score. cal4's whole purpose is judge
         # rigor on prose (position-bias, match dispersion, judge-vs-human kappa) -> all N/A here, and
         # cal3 is the operative gate. Emit an explicit N/A packet; invoke NO judge and NO serve.
-        import abstain
-        all_false = isinstance(abstain.CALIBRATED, dict) and all(v is False for v in abstain.CALIBRATED.values())
         out = {"trials": TRIALS, "workers": WORKERS, "errors": [], "items": {}, "prose_items": [],
                "easy_agreement": None,
                "discretionary_kappa": {"n": 0, "value": None,
                    "verdict": "N/A — golden has no prose items; judge sweep + kappa gate not applicable"},
+               "judge_degradation": {"unscored_count": 0, "by_kind_item": {},
+                                      "sentinel_degraded": False},
                "verdict": "FULLY_DETERMINISTIC — no prose items; cal3 is the operative gate; judge not invoked"}
         print(f"[input]   golden={args.golden}")
         print("[prose]   0 prose items -> judge sweep + easy-agree + kappa gate N/A (cal3 is operative)")
-        print(f"[gate]    abstain.CALIBRATED all_false={all_false} (founder flips, not this)")
-        if not all_false:
-            print("CAL4_FAIL: CALIBRATED must stay all-False"); sys.exit(1)
+        actions, arfail = apply_autorevert(kappa=None, gain=None)
+        out["autorevert"] = actions
+        out["autorevert_scope"] = "process-local evidence only; no persistent/live serving-process revoke"
+        print(f"[gate]    autorevert actions={actions} (kappa=None gain=None -> unmeasurable; "
+              f"fail-closed process-local evidence; founder flips only, not this)")
+        if arfail:
+            print("CAL4_FAIL:", arfail); sys.exit(1)
         with open(args.out, "w") as f:
             json.dump(out, f, indent=2)
         print(f"[write]   {args.out}")
@@ -142,29 +187,47 @@ def main(argv=None):
 
     out = {"trials": TRIALS, "workers": WORKERS, "errors": errors, "items": {}}
     by = {}
+    unscored_by = {}
     for kind, iid, t, v in results:
         if v is not None:
+            if is_unscored(v):
+                unscored_by[f"{kind}:{iid}"] = unscored_by.get(f"{kind}:{iid}", 0) + 1
+                continue
             by.setdefault((kind, iid), []).append(v)
+    unscored_count = sum(unscored_by.values())
+    # Founder split (run-5), mirroring cal3_fit: absent judge degrades (recorded, per-item n<TRIALS
+    # gates below still catch missing coverage); present-but-malfunctioning judge is a hard FAIL.
+    judge_absent = not judge_available()
+    out["judge_degradation"] = {"unscored_count": unscored_count,
+                                "by_kind_item": unscored_by,
+                                "sentinel_degraded": bool(unscored_count),
+                                "judge_absent": judge_absent}
+    fail += [] if (not unscored_count or judge_absent) else [
+        f"judge scoring degraded with JUDGE_CMD present: {unscored_count} unscored trials {unscored_by}"]
 
     # pointwise match dispersion + pairwise position bias, per prose item
     for iid in prose:
         pts = [1.0 if v["match"] else 0.0 for v in by.get(("point", iid), [])]
         a_first = [1.0 if v["winner"] == "first" else 0.0 for v in by.get(("pairA", iid), [])]
         a_second = [1.0 if v["winner"] == "second" else 0.0 for v in by.get(("pairB", iid), [])]
-        arr = np.array(pts) if pts else np.array([np.nan])
-        debiased = (np.mean(a_first) + np.mean(a_second)) / 2 if (a_first and a_second) else float("nan")
-        pos_bias = abs(np.mean(a_first) - np.mean(a_second)) if (a_first and a_second) else float("nan")
+        arr = np.array(pts) if pts else None
+        debiased = (np.mean(a_first) + np.mean(a_second)) / 2 if (a_first and a_second) else None
+        pos_bias = abs(np.mean(a_first) - np.mean(a_second)) if (a_first and a_second) else None
         out["items"][iid] = {
-            "match_median": float(np.median(arr)), "match_mean": round(float(np.mean(arr)), 3),
-            "match_p10": float(np.percentile(arr, 10)), "match_p90": float(np.percentile(arr, 90)),
+            "match_median": (float(np.median(arr)) if arr is not None else None),
+            "match_mean": (round(float(np.mean(arr)), 3) if arr is not None else None),
+            "match_p10": (float(np.percentile(arr, 10)) if arr is not None else None),
+            "match_p90": (float(np.percentile(arr, 90)) if arr is not None else None),
             "n_trials": len(pts),
-            "serve_winrate_debiased": round(float(debiased), 3),
-            "position_bias_delta": round(float(pos_bias), 3)}
+            "serve_winrate_debiased": (round(float(debiased), 3) if debiased is not None else None),
+            "position_bias_delta": (round(float(pos_bias), 3) if pos_bias is not None else None)}
         print(f"[{iid}]  match median={out['items'][iid]['match_median']} "
               f"mean={out['items'][iid]['match_mean']} n={len(pts)} | serve-vs-gold debiased "
               f"winrate={out['items'][iid]['serve_winrate_debiased']} "
               f"position-bias-delta={out['items'][iid]['position_bias_delta']}")
         fail += [] if len(pts) >= TRIALS else [f"{iid} pointwise n={len(pts)} < {TRIALS}"]
+        fail += [] if len(a_first) >= TRIALS else [f"{iid} pairA n={len(a_first)} < {TRIALS}"]
+        fail += [] if len(a_second) >= TRIALS else [f"{iid} pairB n={len(a_second)} < {TRIALS}"]
 
     # easy-case agreement: judge majority vs the deterministic CAL-3 labels (sanity floor, inflated)
     cal3 = json.load(open(args.cal3_results))
@@ -172,9 +235,13 @@ def main(argv=None):
     agree = []
     for iid in easy:
         votes = [1 if v["match"] else 0 for v in by.get(("easy", iid), [])]
+        if not votes:
+            fail.append(f"{iid} easy-agreement n=0")
+            continue
         jl = 1 if sum(votes) * 2 >= len(votes) else 0
         agree.append(1 if jl == det_label[iid] else 0)
-    out["easy_agreement"] = {"rate": round(float(np.mean(agree)), 3), "n": len(agree),
+    out["easy_agreement"] = {"rate": (round(float(np.mean(agree)), 3) if agree else None),
+                             "n": len(agree),
                              "note": "judge vs deterministic labels on easy items — sanity floor, INFLATED by design"}
     print(f"[easy]    judge-vs-deterministic agreement={out['easy_agreement']['rate']} (n={len(agree)})")
 
@@ -183,10 +250,14 @@ def main(argv=None):
                                   "verdict": f"UNMEASURABLE at N={len(prose)} (needs more validated prose items)"}
     print(f"[kappa]   discretionary judge-vs-human: N={len(prose)} -> UNMEASURABLE (insufficient prose items)")
 
-    import abstain
-    # CALIBRATED is now a dict; must-not-flip guard: all namespaces remain False
-    all_false = isinstance(abstain.CALIBRATED, dict) and all(v is False for v in abstain.CALIBRATED.values())
-    fail += [] if all_false else ["CAL-4 must not flip CALIBRATED (all namespaces must stay False)"]
+    kappa = out["discretionary_kappa"]["value"]
+    gain = cal3["selective"].get("gain_pp_raw", cal3["selective"]["gain_pp"])
+    actions, arfail = apply_autorevert(kappa, gain)
+    out["autorevert"] = actions
+    out["autorevert_scope"] = "process-local evidence only; no persistent/live serving-process revoke"
+    print(f"[autorevert] kappa={kappa} gain={gain} actions={actions} "
+          f"(process-local evidence only)")
+    fail += arfail
     fail += [] if not errors else [f"{len(errors)} judge calls failed"]
 
     with open(args.out, "w") as f:

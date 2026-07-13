@@ -40,6 +40,16 @@ and is **not** covered by — or redistributable under — a commercial Builder 
 license; you obtain Neo4j under its own terms. The Python `neo4j` driver that
 Builder Guild links is Apache-2.0 and is unaffected.
 
+## The name vs. the code
+
+Both grants above — AGPL-3.0 and commercial — cover the **code**, not the
+"Builder Guild" **name**. Anyone may run, modify, fork, or host the code under
+its license. If you offer a hosted service or a fork built on it, we ask that you
+present it under your own name — "[Your Name] for Builder Guild," or similar —
+rather than as bare "Builder Guild," so nobody mistakes it for the official
+project. No trademark registration is claimed or promised here; this is a
+naming-clarity note, not a legal filing.
+
 ---
 
 *This document explains the project's licensing intent; it is **not** legal

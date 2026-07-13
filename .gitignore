@@ -63,3 +63,5 @@ audits/
 .buildloop/
 .conductor/
 .explore/
+# session handoff state (machine-local paths + operational state; never publish)
+HANDOFF.md

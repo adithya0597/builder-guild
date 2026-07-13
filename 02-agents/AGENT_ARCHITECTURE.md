@@ -77,8 +77,10 @@ keeps the gate honest after calibration — outcomes, not vibes.
 ## 5. The demo
 
 `src/demo_agent.py` is the smallest correct agent: ask through `serve()`, act only via the gate's
-decision, log the audit record. ~60 lines, because the context layer is doing the work — which is
-the point.
+decision, log the audit record — 92 lines, because the context layer is doing the work — which is
+the point. The agentic loop itself — an agent choosing its own retrieval strategy — is
+`src/planner.py`, proven by `03-evals/src/eval_planner.py` (self-test prints `PLANNER_OK`; see
+`docs/ROADMAP.md`'s Agentic RAG status for the full citation).
 
 ## Known limits (deliberate)
 

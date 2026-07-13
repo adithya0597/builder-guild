@@ -1,6 +1,6 @@
 """eval_planner.py — acceptance tests for the Agentic RAG planner loop (G1).
 
-Tests (all P1-P5 use _serve injection — NO Neo4j needed):
+Tests (all P1-P7 use _serve injection — NO Neo4j needed):
     P1  >=2-self-chosen:  multi-step question; distinct_retrievals>=2, modes differ,
                           terminated_on=="confidence"
     P2  bounded:          gibberish query; steps_used<=max_steps, terminated_on=="abstain",
@@ -10,6 +10,10 @@ Tests (all P1-P5 use _serve injection — NO Neo4j needed):
     P4  isolation-caught: inject _serve returning trace.isolation.clean=False;
                           assert plan() raises AssertionError
     P5  no-op guard:      no (query, pattern) pair repeats across steps
+    P6  decompose:        low sufficiency (<0.34) + facts present but no neighbor-hop target ->
+                          a step chooses retrieval_mode=='decompose'
+    P7  as_of-forwarded:  plan(..., as_of=X) forwards X, unmodified, to every internal _serve
+                          call (kwargs-capture stub, >=2 calls)
 
 demo() is Neo4j-gated (prints PLANNER_OK iff >=2 distinct retrievals + bounded terminal
 + all isolation_clean on a live multi-step question).
@@ -117,7 +121,7 @@ def p1_multi_step():
     NEIGHBOR = "issue:SPI-3"
     call_count = {"n": 0}
 
-    def _stub(query, role, pattern=None, action=None):
+    def _stub(query, role, pattern=None, action=None, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             # Step 1: abstain WITH a fact whose 1-hop target is the planted neighbor
@@ -164,7 +168,7 @@ def p2_bounded():
     """Gibberish query: planner must never exceed max_steps and must terminate
     with decision abstain and terminated_on=='abstain'.
     """
-    def _stub(query, role, pattern=None, action=None):
+    def _stub(query, role, pattern=None, action=None, **kwargs):
         return _make_abstain_result(query, primary=None, facts=[], composed=[])
 
     max_s = 3
@@ -199,7 +203,7 @@ def p3_signal_driven():
     call_count = {"n": 0}
     captured_queries = []
 
-    def _stub(query, role, pattern=None, action=None):
+    def _stub(query, role, pattern=None, action=None, **kwargs):
         call_count["n"] += 1
         captured_queries.append(query)
         if call_count["n"] == 1:
@@ -244,7 +248,7 @@ def p4_isolation_caught():
     """Inject a _serve that returns trace.isolation.clean=False;
     assert plan() raises AssertionError (copies corrective's T4 guard pattern).
     """
-    def _unclean_serve(query, role, pattern=None, action=None):
+    def _unclean_serve(query, role, pattern=None, action=None, **kwargs):
         return {
             "query": query,
             "decision": "abstain",
@@ -275,7 +279,7 @@ def p5_no_op_guard():
     """Assert no (query, pattern) probe pair repeats across planner steps."""
     call_count = {"n": 0}
 
-    def _stub(query, role, pattern=None, action=None):
+    def _stub(query, role, pattern=None, action=None, **kwargs):
         call_count["n"] += 1
         # Force several abstain steps with facts to drive multiple branches
         if call_count["n"] <= 3:
@@ -301,6 +305,74 @@ def p5_no_op_guard():
         seen.add(probe)
 
     print(f"  P5 no-op guard: {len(p['steps'])} steps, all (query, pattern) distinct")
+
+
+# ---------------------------------------------------------------------------
+# P6: decompose branch — low sufficiency + facts present, but no neighbor-hop target
+# ---------------------------------------------------------------------------
+def p6_decompose_branch():
+    """Branch 3 (planner.py:174-185) has zero P1-P5 coverage. Stub returns abstain WITH a fact
+    that has NO '->' substring, so _neighbor_keys() returns [] and Branch 2 (neighbor_hop) cannot
+    fire even though has_facts=True — forcing Branch 3 once sufficiency<0.34. Asserts a step with
+    retrieval_mode=='decompose' occurs.
+    """
+    def _stub(query, role, pattern=None, **kwargs):
+        return {
+            "query": query,
+            "decision": "abstain",
+            "primary": "issue:SPI-3",
+            "presentable_facts": ["issue:SPI-3 has low-confidence supporting text"],
+            "composed_evidence": [],
+            "trace": {
+                "isolation": {"clean": True, "leaked": []},
+                "gate_abstain": {
+                    "sufficiency": 0.2,
+                    "self_confidence": 0.3,
+                    "confidence_basis": "graph_structural_exact",
+                    "score": None,
+                    "final": "abstain",
+                    "mode": "suggest",
+                },
+            },
+            "mode": "suggest",
+            "executed": False,
+            "provenance": {},
+        }
+
+    r = plan("what blocks SPI-3 and who owns it", "engineering", max_steps=4, _serve=_stub)
+    p = r["planner"]
+    modes = [s["retrieval_mode"] for s in p["steps"]]
+    assert "decompose" in modes, f"P6: decompose branch never chosen; modes={modes}"
+    print(f"  P6 decompose-branch: modes={modes}")
+
+
+# ---------------------------------------------------------------------------
+# P7: as_of forwarded — plan(..., as_of=X) reaches every internal _serve call
+# ---------------------------------------------------------------------------
+def p7_as_of_forwarded():
+    """kwargs-capture stub (not an explicit as_of= param) so the test fails if a future refactor
+    drops as_of from the kwarg name or only forwards it on the first call. Forces 2 _serve calls
+    (abstain-with-neighbor then pass) to prove per-iteration forwarding, not a one-shot fluke.
+    """
+    NEIGHBOR = "issue:SPI-3"
+    AS_OF = "2026-06-01T00:00:00Z"
+    captured = []
+
+    def _stub(query, role, pattern=None, **kwargs):
+        captured.append(kwargs.get("as_of"))
+        if len(captured) == 1:
+            return _make_abstain_result(
+                query, primary="issue:SPI-6",
+                facts=[f"issue:SPI-6: BLOCKS -> {NEIGHBOR}"])
+        return _make_pass_result(query, primary="issue:SPI-3")
+
+    plan("who does SPI-6 block", "engineering", max_steps=4, as_of=AS_OF, _serve=_stub)
+
+    assert len(captured) >= 2, f"P7: expected >=2 _serve calls, got {len(captured)}"
+    assert all(a == AS_OF for a in captured), (
+        f"P7: as_of not forwarded on every _serve call: {captured}"
+    )
+    print(f"  P7 as_of-forwarded: {len(captured)} _serve call(s), all as_of={AS_OF!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +522,8 @@ if __name__ == "__main__":
         ("P3", "signal-driven: step2.query_chosen contains planted neighbor key", p3_signal_driven),
         ("P4", "isolation-caught: unclean trace -> AssertionError", p4_isolation_caught),
         ("P5", "no-op guard: no (query,pattern) repeats", p5_no_op_guard),
+        ("P6", "decompose: low-suff+facts+no-neighbor -> a step chooses retrieval_mode=='decompose'", p6_decompose_branch),
+        ("P7", "as_of-forwarded: plan(...,as_of=X) forwards X to every internal _serve call", p7_as_of_forwarded),
     ]
 
     results = []

@@ -1,7 +1,7 @@
 """Agentic RAG planner loop (G1).
 
 Interface:
-    plan(question, role, *, max_steps=4, tau=0.5, _serve=None) -> dict
+    plan(question, role, *, max_steps=4, tau=0.5, as_of=None, _serve=None) -> dict
 
 Bounded loop: each step reads the signal from the PRIOR step's serve() result and
 CHOOSES the next retrieval mode based on that signal (agentic core). Reuses
@@ -84,8 +84,29 @@ def _read_confidence(r, tau):
     return decision, score, suf, self_conf, basis
 
 
-def _neighbor_keys(r):
-    """Pull 1-hop neighbor keys from presentable_facts and composed_evidence (mirrors corrective)."""
+def _resolve_seed_tokens(keys, allowed):
+    """Keep only tokens that resolve to a REAL in-scope :Entity (pdk forged-token guard).
+
+    composed_evidence is UNTRUSTED prose (attacker-influenceable content cards / long_context):
+    a forged issue:/agent: token must never seed re-retrieval unless it names a real
+    namespace-scoped entity. Mirrors serve's `n.key IN $keys AND n.namespace IN $allowed` idiom
+    (duplicated per corrective's mirror convention — a 4-line resolver beats a premature module).
+    """
+    if not keys:
+        return []
+    import serve
+    from neo4j import GraphDatabase
+    with GraphDatabase.driver(serve.URI, auth=serve.AUTH) as drv, drv.session() as s:
+        survivors = {row["k"] for row in s.run(
+            "MATCH (n:Entity) WHERE n.key IN $keys AND n.namespace IN $allowed RETURN n.key AS k",
+            keys=list(keys), allowed=allowed)}
+    return [k for k in keys if k in survivors]
+
+
+def _neighbor_keys(r, allowed):
+    """Pull 1-hop neighbor keys from presentable_facts and composed_evidence (mirrors corrective).
+    composed_evidence tokens are UNTRUSTED prose -> gated through an in-scope :Entity read so a
+    FORGED token can't seed re-retrieval (pdk); presentable_facts '-> key' edges stay trusted."""
     seen = set()
     keys = []
     for fact in r.get("presentable_facts", []):
@@ -95,11 +116,14 @@ def _neighbor_keys(r):
             if nk not in seen:
                 seen.add(nk)
                 keys.append(nk)
+    prose_toks = []
     for line in r.get("composed_evidence", []):
         for nk in re.findall(r"\b(?:issue|agent):[A-Za-z0-9_-]+", line):
-            if nk not in seen:
-                seen.add(nk)
-                keys.append(nk)
+            if nk not in seen and nk not in prose_toks:
+                prose_toks.append(nk)
+    for nk in _resolve_seed_tokens(prose_toks, allowed):
+        seen.add(nk)
+        keys.append(nk)
     return keys
 
 
@@ -112,7 +136,7 @@ def _has_facts(r):
     return bool(r.get("presentable_facts"))
 
 
-def _choose_next(question, current_query, current_pattern, step_result, tried):
+def _choose_next(question, current_query, current_pattern, step_result, tried, allowed):
     """Signal-driven policy switch (the agentic core).
 
     Reads THIS step's signal from step_result and returns
@@ -162,7 +186,7 @@ def _choose_next(question, current_query, current_pattern, step_result, tried):
     # Branch 2: has facts, still abstain — neighbor-hop. (partial is unreachable here:
     # plan() terminates on partial before _choose_next runs, so abstain-only is correct.)
     if has_facts and decision == "abstain":
-        neighbors = _neighbor_keys(step_result)
+        neighbors = _neighbor_keys(step_result, allowed)
         if neighbors:
             nq = (question + " " + " ".join(neighbors[:3])).strip()
             pk = _probe_key(nq, current_pattern)
@@ -187,7 +211,7 @@ def _choose_next(question, current_query, current_pattern, step_result, tried):
     return None, None, None, None
 
 
-def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
+def plan(question, role, *, max_steps=4, tau=0.5, as_of=None, _serve=None):
     """Agentic RAG planner loop.
 
     Bounded to max_steps iterations. Each step reads THIS step's signal and
@@ -197,6 +221,9 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
     if _serve is None:
         from serve import serve as _serve_fn
         _serve = _serve_fn
+
+    from scope import allowed_namespaces
+    allowed = allowed_namespaces(role)   # pdk: neighbor seed-token existence read is role-scoped
 
     steps = []
     tried = set()
@@ -211,7 +238,7 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
         pk = _probe_key(current_query, current_pattern)
         tried.add(pk)
 
-        r = _serve(current_query, role, pattern=current_pattern)
+        r = _serve(current_query, role, pattern=current_pattern, as_of=as_of)
         final_result = r
 
         # Isolation assert EVERY step. A MISSING trace.isolation is acceptable ONLY for the
@@ -294,7 +321,7 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
 
         # Choose next retrieval FROM THIS STEP'S SIGNAL (agentic core)
         nq, npat, nmode, nwhy = _choose_next(
-            question, current_query, current_pattern, r, tried
+            question, current_query, current_pattern, r, tried, allowed
         )
         if nq is None and npat is None:
             # No fresh probe available — bounded exit
@@ -323,3 +350,28 @@ def plan(question, role, *, max_steps=4, tau=0.5, _serve=None):
         "max_steps": max_steps,
     }
     return result
+
+
+def _pdk_selftest():
+    """PDK forged-token guard (neo4j-gated). A FORGED issue:/agent: token in composed_evidence
+    must NOT be returned by _neighbor_keys, while a REAL in-scope entity in the SAME
+    composed_evidence IS kept. Zero LLM, zero network beyond bg-neo4j."""
+    from scope import allowed_namespaces
+    allowed = allowed_namespaces("engineering")
+    real, forged = "agent:cto", "issue:FORGED-999"   # real is seeded engineering; forged is no :Entity
+    r = {"presentable_facts": [],
+         "composed_evidence": [f"content_card: {real} owns it; also see {forged}"]}
+    keys = _neighbor_keys(r, allowed)
+    fail = []
+    if real not in keys:
+        fail.append(f"real in-scope key {real!r} dropped from _neighbor_keys: {keys!r}")
+    if forged in keys:
+        fail.append(f"FORGED token {forged!r} survived _neighbor_keys output: {keys!r}")
+    if fail:
+        print("PDK_FORGED_TOKEN_FAIL(planner):", fail); sys.exit(1)
+    print("PDK_FORGED_TOKEN_OK")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "pdk_selftest":
+        _pdk_selftest()

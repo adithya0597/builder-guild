@@ -1,6 +1,10 @@
 ## What & why
 <!-- What does this change and why? Link any related issue. -->
 
+## AI disclosure
+<!-- Tool + extent for disclosed AI assistance, or "none". Routine autocomplete/Q&A is exempt (see CONTRIBUTING.md § AI-assisted contributions). -->
+- [ ] I understand every line of this change without AI assistance (see CONTRIBUTING.md § AI-assisted contributions)
+
 ## Invariants checklist (Builder Guild keeps these by design)
 - [ ] **No LLM writes a fact** — LLM output stays in the recall layer (`:SearchProxy`, embeddings, hypothetical questions), never in `:Entity` properties or `:RELATES_TO` edges
 - [ ] **Namespace** present on any new node type *and* edge (isolation is a hard property, not an optional filter)

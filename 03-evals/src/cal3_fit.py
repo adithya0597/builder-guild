@@ -31,14 +31,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 from golden import read_golden
 from serve import serve
-from h2b1_calib import fit_logistic, _sigmoid
-from judge_adapter import score_match
+from h2b1_calib import _sigmoid
+from judge_adapter import score_match, is_unscored, judge_available
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_GOLDEN_PATH = os.path.join(HERE, "..", "example_golden.jsonl")
 DEFAULT_JUDGE_CKPT = os.path.join(HERE, "cal3_judge.jsonl")
 DEFAULT_RESULTS_PATH = os.path.join(HERE, "cal3_fit_results.json")
 LOSS_WRONG_ACT, LOSS_MISSED_ACT = 10.0, 1.0          # founder-locked 2026-06-10
+
+
+def _fit_logistic_nd(X, y, lr=0.3, epochs=4000, l2=1e-3):
+    """Same GD as h2b1_calib.fit_logistic (h2b1_calib.py:49-57), generalized to return the FULL
+    d-length weight vector. h2b1_calib.fit_logistic hardcodes a 2-weight return (float(w[0]),
+    float(w[1]), b) and h2b1_calib.py is out of this bead's file ownership, so this is a minimal
+    local n-dimensional version, not a refactor of it. Deterministic zero init (same as the 2-d)."""
+    n, d = X.shape
+    w = np.zeros(d)
+    b = 0.0
+    for _ in range(epochs):
+        z = X @ w + b
+        p = _sigmoid(z)
+        err = p - y
+        w -= lr * (X.T @ err / n + l2 * w)
+        b -= lr * float(np.mean(err))
+    return w, float(b)
 
 
 def parse_args(argv=None):
@@ -96,9 +113,15 @@ def label_correct(item, r, ckpt):
         ok = gold in text and r.get("primary") in support_nodes(item)
         return (1 if ok else 0), "deterministic:id"
     votes = []                                                       # prose golds -> judge, 3 trials
+    unscored = []
     for t in range(3):
         v, _ = score_match(item["question"], text, gold, key=f"cal3:{item['id']}:t{t}", ckpt=ckpt)
+        if is_unscored(v):
+            unscored.append(v.get("reason", "unscored"))
+            continue
         votes.append(1 if v["match"] else 0)
+    if unscored:
+        return None, f"judge:unscored(n={len(unscored)}, votes={sum(votes)})"
     return (1 if sum(votes) >= 2 else 0), f"judge:3trial(votes={sum(votes)})"
 
 
@@ -122,27 +145,74 @@ def main(argv=None):
         r = serve(it["question"], it["role"])
         ga = r.get("trace", {}).get("gate_abstain", {})
         suff, conf = float(ga.get("sufficiency", 0.0)), float(ga.get("self_confidence", 0.0))
+        n_qt = float(ga.get("n_query_terms", 0.0))
+        per_tf = float(ga.get("per_term_found", 0.0))
+        prov = r.get("provenance", {})
+        rung_auth = sum(1 for v in prov.values() if v in ("keyword", "graph")) / max(1, len(prov))
         correct, how = label_correct(it, r, ckpt)
         rows.append({"id": it["id"], "suff": suff, "conf": conf, "decision": r.get("decision"),
                      "expected": it["expected_decision"],
+                     "rung_authority_fraction": rung_auth, "n_query_terms": n_qt,
+                     "per_term_found": per_tf,
                      "correct": correct, "how": how, "answer": answer_text(r)[:90]})
         print(f"  {it['id']:11} suff={suff:.2f} conf={conf:.2f} serve={r.get('decision'):8} "
               f"correct={correct} via {how}")
 
     print(f"[input]   golden={args.golden} judge_ckpt={ckpt}")
-    X = np.array([[r["suff"], r["conf"]] for r in rows])
-    y = np.array([r["correct"] for r in rows])
+    unscored_rows = [r for r in rows if r["correct"] is None]
+    scored_rows = [r for r in rows if r["correct"] is not None]
+    # Founder split (run-5): judge ABSENT (CLI not installed) degrades to CAL3_OK — unscored rows
+    # are excluded from fit/loss and recorded below, so a judge-less local run stays green without
+    # ever silently counting an unjudged row. Judge PRESENT but malfunctioning is a hard CAL3_FAIL:
+    # a broken judge must never read as a clean calibration.
+    judge_absent = not judge_available()
+    judge_degradation = {
+        "unscored_count": len(unscored_rows),
+        "unscored_ids": [r["id"] for r in unscored_rows],
+        "sentinel_degraded": bool(unscored_rows),
+        "judge_absent": judge_absent,
+        "note": "unscored rows are excluded from fit/loss; judge ABSENT degrades to CAL3_OK, "
+                "judge PRESENT-but-malfunctioning forces CAL3_FAIL",
+    }
+    fail += [] if (not unscored_rows or judge_absent) else [
+        f"judge scoring degraded with JUDGE_CMD present: {len(unscored_rows)} unscored rows "
+        f"{judge_degradation['unscored_ids']}"]
+    if not scored_rows:
+        out = {"rows": rows,
+               "features": [],
+               "fit": None,
+               "selective": {"combined_acc": None, "tau_acc": None,
+                             "confidence_only_acc": None, "gain_pp": None,
+                             "gain_pp_raw": None},
+               "loss_10_1": None,
+               "judge_degradation": judge_degradation,
+               "target": "should_act = (expected=='pass') AND serve_correct (decision channel)",
+               "caveat": "no scored rows; judge evidence degraded"}
+        with open(args.out, "w") as f:
+            json.dump(out, f, indent=2)
+        print(f"[write]   {args.out}")
+        print("CAL3_FAIL:", fail or ["no scored rows"]); sys.exit(1)
+    # sufficiency MUST stay column 0 and self_confidence column 1 (conf_only=X[:,1] below is the
+    # confidence-only baseline comparator); richer features are appended AFTER index 1. sufficiency
+    # appears exactly once — coverage_initial is the SAME number under another key and is never a
+    # separate column.
+    features = ["sufficiency", "self_confidence", "rung_authority_fraction",
+                "n_query_terms", "per_term_found"]
+    X = np.array([[r["suff"], r["conf"], r["rung_authority_fraction"],
+                   r["n_query_terms"], r["per_term_found"]] for r in scored_rows])
+    y = np.array([r["correct"] for r in scored_rows], dtype=float)
     # DECISION-CHANNEL target: the gate should ACT iff acting yields a correct outcome — i.e. the
     # item is pass-expected AND serve answered correctly. Abstain-expected items (and pass-expected
     # items serve got wrong) are SHOULD-WITHHOLD. Optimizing against `correct` alone wrongly rewarded
     # ACTING on correctly-abstained items (they are correct, but acting on them is wrong), which
     # collapsed TAU*. The item-3 decision channel is now carried through the FIT + loss + search,
     # not just the label.
-    should_act = np.array([1 if (r["expected"] == "pass" and r["correct"] == 1) else 0 for r in rows])
-    w_s, w_c, b = fit_logistic(X, should_act)
-    scores = _sigmoid(X @ np.array([w_s, w_c]) + b)
-    print(f"\n[fit]     decision-channel logistic: W_SUFFICIENCY={w_s:.3f} W_CONFIDENCE={w_c:.3f} "
-          f"BIAS={b:.3f} (n={len(should_act)}, correct base-rate={y.mean():.2f}, "
+    should_act = np.array([1 if (r["expected"] == "pass" and r["correct"] == 1) else 0 for r in scored_rows])
+    w, b = _fit_logistic_nd(X, should_act)
+    scores = _sigmoid(X @ w + b)
+    weight_str = " ".join(f"{f}={wi:+.3f}" for f, wi in zip(features, w))
+    print(f"\n[fit]     decision-channel logistic: {weight_str} BIAS={b:+.3f} "
+          f"(n={len(should_act)} scored/{len(rows)} total, correct base-rate={y.mean():.2f}, "
           f"act-target base-rate={should_act.mean():.2f})")
 
     taus = np.linspace(0.05, 0.95, 91)
@@ -150,9 +220,12 @@ def main(argv=None):
     comb = selective_accuracy(scores, should_act, tau_acc)
     conf_only = X[:, 1]
     conf_acc = max(selective_accuracy(conf_only, should_act, t) for t in taus)
-    gain = round((comb - conf_acc) * 100, 1)
+    gain_raw = float((comb - conf_acc) * 100.0)
+    gain = round(gain_raw, 1)
+    if gain == 0:
+        gain = 0.0
     print(f"[select]  combined acc={comb:.2f} @tau={tau_acc:.2f} | confidence-only acc={conf_acc:.2f} "
-          f"| gain={gain:+.1f}pp  [n={len(should_act)}]")
+          f"| gain={gain:+.1f}pp raw={gain_raw:+.6f}pp  [n={len(should_act)}]")
 
     losses = [expected_loss(scores, should_act, t) for t in taus]
     tau_star = float(taus[int(np.argmin(losses))])
@@ -177,11 +250,14 @@ def main(argv=None):
         f"degenerate TAU*={tau_star:.2f}: gate acts on 0/{len(should_act)} items (all withheld) — wrong-act guard vacuous"]
     fail += [] if wrong_act == 0 else [f"TAU* under 10:1 must zero wrong-acts on this slice (got {wrong_act})"]
 
-    out = {"rows": rows, "fit": {"W_SUFFICIENCY": w_s, "W_CONFIDENCE": w_c, "BIAS": b},
+    out = {"rows": rows,
+           "features": features,
+           "fit": {**{f: round(float(x), 4) for f, x in zip(features, w)}, "BIAS": round(float(b), 4)},
            "selective": {"combined_acc": comb, "tau_acc": tau_acc, "confidence_only_acc": conf_acc,
-                         "gain_pp": gain},
+                         "gain_pp": gain, "gain_pp_raw": gain_raw},
            "loss_10_1": {"tau_star": tau_star, "acts": int(act.sum()), "wrong_acts": wrong_act,
                          "missed_act": missed},
+           "judge_degradation": judge_degradation,
            "target": "should_act = (expected=='pass') AND serve_correct (decision channel)",
            "caveat": f"n={len(should_act)}; weights NOT written to abstain.py; CALIBRATED dict all False (untouched)"}
     with open(args.out, "w") as f:

@@ -6,10 +6,32 @@ cached — the card is built per request, so it is always current (PART 3-B).
 """
 import os
 import re
+import json
+import hashlib
+import subprocess
 import yaml
+from datetime import datetime
 from pathlib import Path
 from neo4j import GraphDatabase
 URI, AUTH = os.environ.get("NEO4J_URI", "bolt://localhost:7688"), ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
+
+
+def _resolve_commit_id():
+    """A1 envelope: commit_id is a per-deployment CONSTANT, resolved ONCE at import (never per
+    request — the hot path stays read-only/process-const). BG_COMMIT_ID env override wins first
+    (deployed artifacts without a .git dir); the subprocess call is guarded so a non-git checkout
+    (or git absent) degrades to 'unknown' instead of breaking CI's import-all smoke."""
+    override = os.environ.get("BG_COMMIT_ID")
+    if override:
+        return override
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent,
+                              capture_output=True, text=True, check=True, timeout=5).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+COMMIT_ID = _resolve_commit_id()
 # arity:1 relations — a functional relation with >1 current edge is an exactly-one-current breach
 # that reconcile must quarantine (ambiguous_functional). Sourced from the rule contract, not hardcoded.
 FUNCTIONAL_RELS = {r for r, spec in
@@ -33,7 +55,23 @@ RETURN i.key AS node, i.long_context AS long_context, coalesce(i.dirty,false) AS
    } END) WHERE x IS NOT NULL] AS facts
 """
 
+def _validate_as_of(as_of):
+    """as_of is caller-supplied and now reachable from MCP. Validate it parses as ISO-8601 at the
+    Python boundary — the single place every as_of-taking entry (serve/node_card, and the rungs they
+    call) funnels it into Cypher `datetime($as_of)` — so a malformed string raises a clean ValueError
+    here instead of leaking a raw neo4j CypherSyntaxError from deep in a query."""
+    if as_of is None:
+        return
+    try:
+        datetime.fromisoformat(str(as_of))
+    except ValueError as e:
+        raise ValueError(
+            f"as_of must be an ISO-8601 datetime string (e.g. '2026-06-04T01:00:00Z'), got {as_of!r}"
+        ) from e
+
+
 def node_card(key, allowed, as_of=None):
+    _validate_as_of(as_of)
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
         rec = s.run(NODE_CARD, key=key, allowed=allowed, as_of=as_of).single()
         return rec.data() if rec else None
@@ -107,6 +145,51 @@ def _support_coverage(query_text, primary, presentable_facts):
     return round(min(1.0, len(q & r) / max(1, len(q))), 2)
 
 
+def _coverage_features(query_text, primary, presentable_facts):
+    """Sibling to _support_coverage — SAME Q/R construction (canonicalized bare-vs-prefixed
+    intersection, support-gated R), but exposes the raw sizes (|Q|, |Q∩R|) instead of the ratio,
+    for the richer cal3_fit feature matrix. Read-only diagnostics: threaded into trace only, never
+    fed back into abstain.stage_a_decision (the live gate still sees sufficiency+confidence alone).
+    Does NOT change _support_coverage's scalar contract (test_g3.py:90-122 pins that function).
+    # ponytail: deliberate ~8-line mirror — _support_coverage's body is test-pinned and out of this
+    # bead's touch-scope; dedupe into a shared _qr_sets() only if/when that pin is relaxed."""
+    def _canon(k):
+        return k.rsplit(":", 1)[-1]
+    q = {_canon(k) for k in re.findall(
+        r"\b(?:issue|agent):[A-Za-z0-9_-]+|[A-Z]+-\d+", query_text or "")}
+    r = set()
+    for f in presentable_facts:
+        m = re.search(r"->\s*(\S+)", f)
+        if m:
+            r.add(_canon(m.group(1)))
+    if presentable_facts:
+        r.add(_canon(primary))
+    return {"n_query_terms": len(q), "per_term_found": len(q & r)}
+
+
+_SRC_CLASS = {'obs': 'engram', 'cmobs': 'claude-mem', 'ledger': 'explore-ledger',
+              'runledger': 'run-ledger', 'extsrc': 'doc', 'doc': 'doc'}
+_GRAPH_PREFIXES = {'issue', 'agent', 'project', 'status', 'community', 'repo'}
+
+
+def _src_class(kk):
+    """Provenance-CLASS LABEL only; raw body escaping is handled by _display_body. Pure prefix->class map off the
+    key string already in scope at each composed_evidence append site in _add_card and the
+    pageindex append. Known structured-domain prefixes (issue:/agent:/project:/status:/community:)
+    -> 'graph'. Unknown prefixes fail closed to 'doc', never to the highest-trust graph label."""
+    prefix = kk.split(':', 1)[0]
+    if prefix in _SRC_CLASS:
+        return _SRC_CLASS[prefix]
+    if prefix in _GRAPH_PREFIXES:
+        return 'graph'
+    return 'doc'
+
+
+def _display_body(text, limit=200):
+    """Escape raw evidence text so only serve-owned brackets render provenance tags. limit=None -> no truncation."""
+    return str(text).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")[:limit]
+
+
 # serve-join (SERVE_JOIN_DESIGN §2-§3): the PageIndex host node's live freshness, read at serve
 # time. A dirty host node makes its drilled sections non-actionable (freshness propagation): the
 # section EvidenceItems inherit node_fresh="stale" -> freshness_state="dirty" -> the gate refuses
@@ -128,7 +211,7 @@ def _host_freshness(s, key, allowed):
 
 
 def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=False,
-          include_communities=False):
+          include_communities=False, as_of=None):
     """INT-3: the end-to-end serve chain on the real graph. WIRES the modules:
     scope -> graph_rung + vector_rung -> fuse(RRF) -> epist(authority) -> stamp -> reconcile ->
     serve-join (deep PageIndex escalation, OPT-IN) -> gate+abstain -> execute.
@@ -152,27 +235,56 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
     SECURITY: `role` is TRUSTED here. It must be AUTHENTICATED upstream — a self-asserted
     role='governance' would read all namespaces. Do not expose `role` to an unauthenticated caller.
     """
-    import scope as _scope, ladder, fuse, stamp, reconcile, abstain, evidence, epist
+    import scope as _scope, ladder, fuse, stamp, reconcile, abstain, evidence, epist, embed
     import pageindex_adapter
     # env can only turn communities ON (never off): param passed True always wins; param
     # omitted/False lets SERVE_INCLUDE_COMMUNITIES=1 flip it (o46).
     include_communities = include_communities or os.environ.get("SERVE_INCLUDE_COMMUNITIES") == "1"
+    _validate_as_of(as_of)                             # fail clean on malformed as_of before any Cypher
     sc = _scope.scope(role)
     allowed, k = sc["allowed"], sc["t_cap"]
     action = action or {"category": "routine", "reversible": True}
     trace = {"role": role, "allowed": allowed}
 
+    # A1 reproducible read envelope — computed ONCE here so EVERY return path (incl. the no_retrieval
+    # early return below) carries the same 3 keys. commit_id is process-const (resolved at import);
+    # snapshot_id is the temporal cut; audit_id is a DETERMINISTIC, input-sensitive handle (not a
+    # per-call uuid/clock) — same call args -> same audit_id. `action` is folded in because it flows
+    # into gate() and changes the decision, so distinct actions must yield distinct audit_ids.
+    snapshot_id = as_of if as_of is not None else "current"
+    audit_id = hashlib.sha256("|".join([
+        COMMIT_ID, snapshot_id, query_text or "", role, repr(pattern), str(as_of),
+        str(deep_serve), str(rerank), str(include_communities),
+        json.dumps(action, sort_keys=True)]).encode()).hexdigest()[:16]
+
     with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
         # 1. RETRIEVE — keyword (exact-ID) + graph (structural) + vector (recall), all namespace-scoped
         kw_hits = ladder.keyword_rung(s, allowed, query_text) if query_text else []
-        graph_hits = ladder.graph_rung(s, allowed, pattern) if pattern else []
-        vec_hits = ladder.vector_rung(s, allowed, query_text, k) if query_text else []
-        vec_keys = [h["key"] for h in vec_hits]
+        graph_hits = ladder.graph_rung(s, allowed, pattern, as_of=as_of) if pattern else []
+        vec_hits_raw = ladder.vector_rung(s, allowed, query_text, k) if query_text else []
         # cf7 rung 2b — chunk-level vector recall ("which passage"). Returns parent keys (for fusion) +
         # the SELECTED passage per parent (for bzr surfacing). Gated on chunk vectors existing, so a
         # graph with only single-chunk nodes (no :Chunk materialized) behaves exactly as before.
-        chunk_hits = (ladder.chunk_rung(s, allowed, query_text, k)
-                      if query_text and ladder.chunk_vector_available(s) else [])
+        chunk_hits_raw = (ladder.chunk_rung(s, allowed, query_text, k)
+                          if query_text and ladder.chunk_vector_available(s) else [])
+        # A2 guard: an ANN hit stamped with an embedding_model OTHER than the live embedder is an
+        # incomparable vector space (cosine scores across two models are not commensurable) — it must
+        # never reach RRF fusion. DROP-and-COUNT (not raise): raising on any lingering old-model row
+        # would break serve() during a normal re-embed window; excluding the untrustworthy vector IS
+        # the closed failure, and the count keeps the silent recall-loss observable in trace.
+        # NULL/MISSING embedding_model is NOT a proven mismatch — only ONE model has ever existed, so
+        # every legacy :Entity/:Chunk written before the stamp carries no model and IS current-era.
+        # Dropping NULL on equality is a recall regression on all legacy data; keep NULL, drop only a
+        # SET-AND-DIFFERENT model. UPGRADE PATH: before introducing a 2nd embedding model, a backfill
+        # MUST stamp every legacy chunk with the current MODEL so this guard can tell the eras apart.
+        def _model_ok(h):
+            m = h.get("embedding_model")
+            return m is None or m == embed.MODEL
+        vec_hits = [h for h in vec_hits_raw if _model_ok(h)]
+        chunk_hits = [h for h in chunk_hits_raw if _model_ok(h)]
+        model_mismatch_dropped = ((len(vec_hits_raw) - len(vec_hits))
+                                  + (len(chunk_hits_raw) - len(chunk_hits)))
+        vec_keys = [h["key"] for h in vec_hits]
         chunk_keys = [h["key"] for h in chunk_hits]
         chunk_passages = {h["key"]: h["chunk"] for h in chunk_hits}    # bzr: parent key -> selected passage
         # CORRELATED-SOURCE DEDUP (post-impl red-team B1): node-vector (2a) and chunk-vector (2b) are
@@ -184,7 +296,8 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         # the FULL chunk hits — the rung still reports/surfaces db-runbook even when vector also found it.)
         chunk_fusion = [c for c in chunk_keys if c not in vec_keys]
         trace["retrieve"] = {"keyword": kw_hits, "graph": graph_hits, "vector": vec_keys,
-                             "chunk": chunk_keys, "chunk_fused": chunk_fusion}
+                             "chunk": chunk_keys, "chunk_fused": chunk_fusion,
+                             "model_mismatch_dropped": model_mismatch_dropped}
 
         # 2. FUSE — RRF across whichever sources fired. fuse.rrf breaks RRF score-ties by SOURCE
         # AUTHORITY (keyword > graph > vector > chunk), so an exact-ID reference beats an equally-ranked
@@ -200,7 +313,8 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
             # optional embedder and keyword/graph also miss). primary=None signals nothing retrieved.
             no_retrieval = {"query": query_text, "role": role, "primary": None, "presentable_facts": [],
                             "composed_evidence": [], "decision": "abstain", "mode": "suggest",
-                            "reason": "no in-scope retrieval", "executed": False, "provenance": {}, "trace": trace}
+                            "reason": "no in-scope retrieval", "executed": False, "provenance": {}, "trace": trace,
+                            "commit_id": COMMIT_ID, "snapshot_id": snapshot_id, "audit_id": audit_id}
             # o46: flag-ON must still carry "communities" on a miss query (uniform envelope, never a
             # missing key); flag-OFF stays BYTE-IDENTICAL to pre-o46 (no key added at all).
             if include_communities:
@@ -253,7 +367,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         trace["epist"] = {"primary_source": sources[primary], "authority": "keyword=graph>vector>chunk"}
 
         # 4. STAMP + 5. RECONCILE — the primary node's card (o.namespace-isolated)
-        rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed).single()
+        rec = s.run(stamp.CARD_Q, key=primary, allowed=allowed, as_of=as_of).single()
         facts = stamp.stamp_card(rec)
         node_fresh = "stale" if rec["node_dirty"] else "fresh"
         card = reconcile.reconcile(node_fresh, facts, FUNCTIONAL_RELS)
@@ -269,7 +383,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         composed = []
         expand = []                                  # 1-hop: in-scope targets of presented facts
         def _add_card(kk):
-            crec = s.run(stamp.CARD_Q, key=kk, allowed=allowed).single()
+            crec = s.run(stamp.CARD_Q, key=kk, allowed=allowed, as_of=as_of).single()
             if crec is None:
                 return
             # 3zy: tag BOTH presentation surfaces with the PARENT's live freshness ([fresh]/[stale])
@@ -279,21 +393,22 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
             # ACT); this marker NEVER becomes a gate claim, it only annotates what is shown. Mirrors the
             # node-vector lazy-refresh staleness window — a pre-existing pattern, not a cf7 regression.
             # The [..] marker sits AFTER the (kk) token so existing content(kk)/content_chunk(kk) prefix
-            # matches (and the isolation issue:/agent: regex) are unaffected.
+            # matches (and the isolation issue:/agent: regex) are unaffected. The src:<class> provenance
+            # tag added inside the same bracket follows the identical placement rule, for the same reason.
             pmark = "stale" if crec["node_dirty"] else "fresh"
             ctx = s.run("MATCH (n:Entity {key:$k}) WHERE n.namespace IN $allowed "
                         "RETURN n.long_context AS ctx", k=kk, allowed=allowed).single()
             if ctx and ctx["ctx"]:
-                composed.append(f"content({kk}) [{pmark}]: {ctx['ctx'][:200]}")
+                composed.append(f"content({kk}) [{pmark} src:{_src_class(kk)}]: {_display_body(ctx['ctx'])}")
             # bzr: a node retrieved via chunk-vector (rung 2b) surfaces its SELECTED passage — the chunk
             # the query actually matched — not just the long_context abstract (whose [:200] truncation may
             # cut before the relevant span). Only the ONE selected chunk is surfaced (chunk_passages is
             # already deduped to the best passage per parent), so this never bloats the answer with all
             # chunks (the bzr concern). This is the read that makes embed.py's n.chunks no longer dead.
             if kk in chunk_passages:
-                composed.append(f"content_chunk({kk}) [{pmark}]: {chunk_passages[kk][:200]}")
+                composed.append(f"content_chunk({kk}) [{pmark} src:{_src_class(kk)}]: {_display_body(chunk_passages[kk])}")
             for f in stamp.freshness_judge(stamp.stamp_card(crec)):
-                composed.append(f"{kk}: {f['fact']}")
+                composed.append(f"{kk} [src:{_src_class(kk)}]: {_display_body(f['fact'], limit=None)}")
                 m = re.search(r"->\s*(\S+)", f["fact"])
                 if m:
                     expand.append(m.group(1))
@@ -399,7 +514,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                             source_path=src_path,
                             section_id=",".join(deep["sections"]),
                             node_fresh=host_fresh))
-                        composed.append(f"pageindex({host}): {deep['answer']}")   # augment answer surface
+                        composed.append(f"pageindex({host}) [src:{_src_class(host)}]: {_display_body(deep['answer'], limit=None)}")   # augment answer surface, escape-only (no truncation)
                         deep_augmented = True
             trace["serve_join"] = {"coverage_initial": coverage_initial,
                                    "drill_candidate": drill_candidate, "candidate_has_sha": candidate_has_sha,
@@ -407,6 +522,7 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
                                    "deep_fired": deep_fired, "deep_augmented": deep_augmented,
                                    "pageindex_host": pageindex_host_note,
                                    "resolved_at": deep.get("resolved_at") if deep else None,
+                                   "mechanism": deep.get("mechanism") if deep else None,
                                    "n_pageindex_sections": len(pageindex_items)}
 
         # (b)+(c) NORMALIZE -> EPIST AUTHORITY ORDER -> the ordered set builds the gate claims.
@@ -469,19 +585,24 @@ def serve(query_text, role, pattern=None, action=None, deep_serve=False, rerank=
         # G3 Item 2 — DETERMINISTIC support-fact coverage signal. Computed by the pure
         # module-level helper _support_coverage() (see its docstring): canonicalized
         # bare-vs-prefixed intersection, support-gated R, and |Q|=0 -> 0.0 (NO count fallback).
-        sufficiency = _support_coverage(query_text, primary, [f["fact"] for f in card["presentable"]])
+        presentable_fact_list = [f["fact"] for f in card["presentable"]]
+        sufficiency = _support_coverage(query_text, primary, presentable_fact_list)
+        cov_features = _coverage_features(query_text, primary, presentable_fact_list)
 
         decision = abstain.stage_a_decision(claims, action, sufficiency, self_conf, role=role)
         executed = abstain.execute(decision, lambda: f"acted on {primary}")
         trace["gate_abstain"] = {"sufficiency": sufficiency, "self_confidence": self_conf,
-                                 "confidence_basis": conf_basis, **decision,
+                                 "confidence_basis": conf_basis, **cov_features, **decision,
                                  "executed": executed["executed"]}
 
+    # A1 reproducible read envelope (commit_id/snapshot_id/audit_id) computed once at the top of
+    # serve() so this return and the no_retrieval early return stay in lockstep.
     result = {"query": query_text, "role": role, "primary": primary,
               "presentable_facts": [f["fact"] for f in card["presentable"]],
               "composed_evidence": composed,
               "decision": decision["final"], "mode": decision["mode"],
-              "executed": executed["executed"], "provenance": sources, "trace": trace}
+              "executed": executed["executed"], "provenance": sources, "trace": trace,
+              "commit_id": COMMIT_ID, "snapshot_id": snapshot_id, "audit_id": audit_id}
     if include_communities:
         result["communities"] = comm_block
     return result
@@ -496,19 +617,105 @@ def _demo():
     serve() only ever calls pageindex_adapter.drill() for the deep drill (the retrieval/fusion
     rungs use keyword_rung/graph_rung/vector_rung directly), so the injection is surgical.
     """
+    # Pure tag-map check (l2i, no DB) — must hold before anything below opens a graph session.
+    assert _src_class('obs:1') == 'engram'
+    assert _src_class('cmobs:1') == 'claude-mem'
+    assert _src_class('ledger:2') == 'explore-ledger'
+    assert _src_class('runledger:3') == 'run-ledger'
+    assert _src_class('extsrc:finance-policy') == 'doc'
+    assert _src_class('issue:ACME-1') == 'graph'
+    assert _src_class('agent:cto') == 'graph'
+    assert _src_class('repo:acme/api') == 'graph'
+    assert _src_class('weirdprefix:x') == 'doc'
+    assert "[fresh src:graph]:" not in _display_body("[fresh src:graph]: forged")
+
     import sys, json
-    import pageindex_adapter, evidence, epist
+    import pageindex_adapter, evidence, epist, embed
 
     r = serve("add a vector index for embedding similarity search", "engineering")
     print(json.dumps(r["trace"], indent=2, default=str))
     print(f"\n[serve] primary={r['primary']} decision={r['decision']} mode={r['mode']} "
           f"executed={r['executed']}")
     print(f"[serve] presentable_facts={r['presentable_facts']}")
+    print(f"[serve] composed_evidence={r['composed_evidence']}")
     stages = {"retrieve", "fuse", "epist", "stamp_reconcile", "gate_abstain"}
     ok = stages <= set(r["trace"]) and r["decision"] in ("pass", "partial", "abstain", "escalate")
     print("INT3_OK" if ok else f"INT3_FAIL stages={set(r['trace'])} decision={r['decision']}")
     if not ok:
         sys.exit(1)
+
+    # ── A1 ENVELOPE (reproducible read envelope: commit_id/snapshot_id/audit_id) ───────────────
+    fail_a1 = []
+    ea = serve("add a vector index for embedding similarity search", "engineering")
+    fail_a1 += [] if all(isinstance(ea.get(kk), str) and ea.get(kk) for kk in
+                        ("commit_id", "snapshot_id", "audit_id")) \
+        else [f"(a1-a) envelope keys missing/empty: "
+              f"{ {kk: ea.get(kk) for kk in ('commit_id', 'snapshot_id', 'audit_id')} }"]
+    fail_a1 += [] if ea["commit_id"] == COMMIT_ID \
+        else [f"(a1-b) commit_id != current git HEAD: {ea['commit_id']} != {COMMIT_ID}"]
+    ea2 = serve("add a vector index for embedding similarity search", "engineering")
+    fail_a1 += [] if ea["audit_id"] == ea2["audit_id"] \
+        else ["(a1-c) audit_id not reproducible across identical serve() calls"]
+    ea3 = serve("a totally different query about something else entirely", "engineering")
+    fail_a1 += [] if ea["audit_id"] != ea3["audit_id"] \
+        else ["(a1-d) audit_id did not change when query_text changed"]
+    fail_a1 += [] if ea["snapshot_id"] == "current" \
+        else [f"(a1-e) snapshot_id must be 'current' when as_of=None, got {ea['snapshot_id']!r}"]
+    ea4 = serve("issue:ACME-2 blocks issue:ACME-1", "engineering", as_of="2026-06-04T01:00:00Z")
+    fail_a1 += [] if ea4["snapshot_id"] == "2026-06-04T01:00:00Z" \
+        else [f"(a1-e) snapshot_id must equal as_of, got {ea4['snapshot_id']!r}"]
+    # audit_id must be action-sensitive: `action` flows into the gate decision, so a different action
+    # (same query/role) MUST yield a different audit_id (finding B — else two decisions share a handle).
+    ea5 = serve("add a vector index for embedding similarity search", "engineering",
+                action={"category": "sensitive", "reversible": False})
+    fail_a1 += [] if ea["audit_id"] != ea5["audit_id"] \
+        else ["(a1-f) audit_id did not change when action changed (action omitted from hash)"]
+    print(f"[a1]     commit_id={ea['commit_id']} snapshot_id={ea['snapshot_id']} audit_id={ea['audit_id']}")
+    if fail_a1:
+        print("A1_ENVELOPE_FAIL:", fail_a1); sys.exit(1)
+    print("A1_ENVELOPE_OK")
+
+    # NO_RETRIEVAL ENVELOPE PARITY (finding A) — the early-return miss path must carry the SAME 3
+    # envelope keys as the normal return. query_text="" -> zero rankings -> no_retrieval branch.
+    enr = serve("", "engineering")
+    nr_fail = [] if (enr.get("primary") is None and all(
+        isinstance(enr.get(kk), str) and enr.get(kk)
+        for kk in ("commit_id", "snapshot_id", "audit_id"))) \
+        else [f"(a1-noretr) no_retrieval envelope keys missing/empty: "
+              f"{ {kk: enr.get(kk) for kk in ('commit_id', 'snapshot_id', 'audit_id')} }"]
+    if nr_fail:
+        print("A1_NORETRIEVAL_FAIL:", nr_fail); sys.exit(1)
+    print("A1_NORETRIEVAL_OK")
+
+    # ── A2 EMBED MODEL-MISMATCH GUARD (fail-closed) ────────────────────────────────────────────
+    fail_a2 = []
+    STALE_KEY, CTRL_KEY = "a2test:stale-node", "a2test:control-node"
+    q_a2 = "the reticulated splines subsystem needs a stability review before rollout"
+    stale_vec, ctrl_vec = embed.embed(q_a2), embed.embed(q_a2)   # both cosine ~1.0 to q_a2
+    with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+        s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[STALE_KEY, CTRL_KEY])
+        s.run("CREATE (n:Entity {key:$k, namespace:'engineering', embedding:$v, "
+              "embedding_model:'STALE-MODEL-vX'})", k=STALE_KEY, v=stale_vec)
+        s.run("CREATE (n:Entity {key:$k, namespace:'engineering', embedding:$v, embedding_model:$m})",
+              k=CTRL_KEY, v=ctrl_vec, m=embed.MODEL)
+        s.run("CALL db.awaitIndexes()")
+    try:
+        r_a2 = serve(q_a2, "engineering")
+    finally:
+        with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+            s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[STALE_KEY, CTRL_KEY])
+    retr = r_a2["trace"]["retrieve"]
+    surfaced = set(retr["vector"]) | set(retr["chunk"]) | {r_a2["primary"]}
+    dropped = retr.get("model_mismatch_dropped", 0)
+    print(f"[a2]     vector_hits={retr['vector']} dropped={dropped} primary={r_a2['primary']}")
+    fail_a2 += [] if STALE_KEY not in surfaced \
+        else [f"(a2-a) stale-model node leaked into fused/presentable result: {surfaced}"]
+    fail_a2 += [] if dropped >= 1 else [f"(a2-b) model_mismatch_dropped not recorded: {dropped}"]
+    fail_a2 += [] if CTRL_KEY in retr["vector"] \
+        else [f"(a2-c) control node (correct MODEL) not retrieved: {retr['vector']}"]
+    if fail_a2:
+        print("A2_EMBED_GUARD_FAIL:", fail_a2); sys.exit(1)
+    print("A2_EMBED_GUARD_OK")
 
     # ── SERVE-JOIN (stubbed adapter, $0) ────────────────────────────────────────────────────────
     fail = []
@@ -579,7 +786,7 @@ def _demo():
     # (a) the normalizer produces a prose-authority EvidenceItem with host key + section id +
     #     source path — fields the join CODE sets, not the drill dict:
     pit = evidence.from_pageindex(host_node_id=_DRILL["doc"], namespace="shared",
-                                  text=_DRILL["answer"], source_path="/docs/context-evals.md",
+                                  text=_DRILL["answer"], source_path="01-context/HYBRID_RETRIEVAL_ARCHITECTURE.md",
                                   section_id=_DRILL["sections"][0], node_fresh="fresh")
     fail += [] if (pit.retrieval_method == "pageindex" and pit.authority_hint == "prose"
                    and pit.node_id == _DRILL["doc"] and pit.section_id == _DRILL["sections"][0]
@@ -636,6 +843,36 @@ def _demo():
           f"(no stale claim: NOT the faithfulness hard-gate)")
     fail += [] if f_via == "sufficiency×confidence" \
         else [f"(ii) fresh-host control should route via sufficiency×confidence, got via={f_via}"]
+
+    # ── TEMPORAL as_of (run-4 / builder-guild-w14): planted supersession, 3 timepoints + n_superseded
+    # guard. serve.py is NOT in the write-gateway CALL_ALLOWLIST for the write engine, so the chain is
+    # planted via stamp.plant_supersession (stamp.py IS allowlisted); cleanup is a raw DETACH DELETE.
+    import stamp
+    A_ISS, A_OLD, A_NEW = "issue:asofprobe", "status:asofprobe-old", "status:asofprobe-new"
+    A_NS = "engineering"                                        # engineering role can read this slice
+    T0, TB, T1, TA = ("2026-06-04T00:00:00Z", "2026-06-04T00:30:00Z",
+                      "2026-06-04T01:00:00Z", "2026-06-04T02:00:00Z")   # T0 < TB < T1 < TA < now
+    old_fact, new_fact = f"HAS_STATUS -> {A_OLD}", f"HAS_STATUS -> {A_NEW}"
+    stamp.plant_supersession(A_ISS, "HAS_STATUS", A_OLD, A_NEW, A_NS, T0, T1)
+    try:
+        r_before = serve("asofprobe", "engineering", as_of=TB)   # T0 <= TB < T1  -> OLD is current
+        r_now    = serve("asofprobe", "engineering")             # as_of=None -> now (> T1) -> NEW current
+        r_after  = serve("asofprobe", "engineering", as_of=TA)   # TA > T1        -> NEW is current
+        pf_b, pf_n, pf_a = (r_before["presentable_facts"], r_now["presentable_facts"],
+                            r_after["presentable_facts"])
+        nsup = r_now["trace"]["stamp_reconcile"]["n_superseded"]
+        print(f"[as_of]  primary={r_now['primary']} T_before={pf_b} now={pf_n} T_after={pf_a} "
+              f"n_superseded@None={nsup}")
+        fail += [] if (r_before["primary"] == A_ISS and old_fact in pf_b and new_fact not in pf_b) \
+            else [f"(as_of) T_before must surface OLD value only: primary={r_before['primary']} pf={pf_b}"]
+        fail += [] if (new_fact in pf_n and old_fact not in pf_n) \
+            else [f"(as_of) as_of=None must surface NEW value only: pf={pf_n}"]
+        fail += [] if new_fact in pf_a else [f"(as_of) T_after must surface NEW value: pf={pf_a}"]
+        fail += [] if nsup >= 1 \
+            else [f"(as_of) n_superseded must be >=1 at as_of=None (CARD_Q hard-filtered?): {nsup}"]
+    finally:
+        with GraphDatabase.driver(URI, auth=AUTH) as drv, drv.session() as s:
+            s.run("MATCH (n) WHERE n.key IN $k DETACH DELETE n", k=[A_ISS, A_OLD, A_NEW])
 
     if fail:
         print("INT3_FAIL(serve-join):", fail); sys.exit(1)
@@ -719,7 +956,8 @@ def _communities_demo():
     fail += [] if "communities" not in r_off1 else ["(b) 'communities' key present when flag OFF"]
     fail += [] if "communities" not in r_off1["trace"] else ["(b) trace['communities'] present when flag OFF"]
     pre_change_keys = {"query", "role", "primary", "presentable_facts", "composed_evidence",
-                       "decision", "mode", "executed", "provenance", "trace"}
+                       "decision", "mode", "executed", "provenance", "trace",
+                       "commit_id", "snapshot_id", "audit_id"}   # A1: envelope is now part of the base shape
     fail += [] if set(r_off1.keys()) == pre_change_keys else [f"(b) key set drifted: {set(r_off1.keys())}"]
 
     # (c) zero writes: the literal query string is MATCH-only

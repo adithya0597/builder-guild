@@ -1,10 +1,12 @@
 """etl_history.py (builder-guild-22w): session-history deterministic ingest — dogfood corpus #1.
 
-Ingests two REAL local stores into ONE dedicated `history` namespace, ZERO LLM (pure sqlite3/json/re
+Ingests THREE REAL local stores into ONE dedicated `history` namespace, ZERO LLM (pure sqlite3/json/re
 + the mutate.py write engine, same convention as etl.py):
-  - ~/.engram/engram.db `observations` rows (builder-guild project; env ENGRAM_DB)  -> :Entity:Observation
-  - .explore/source-ledger.jsonl records (one per line)                          -> :Entity:Source
-Both group under a :Entity:Project node (key=project:<canon_project(name)>), linked PART_OF — the
+  - ~/.engram/engram.db `observations` rows (builder-guild project; env ENGRAM_DB)        -> :Entity:Observation, key obs:<id>
+  - ~/.claude-mem/claude-mem.db `observations` rows (buffalo project; env CLAUDE_MEM_DB;
+    builder-guild-br7 adapter, 2026-07-03)                                               -> :Entity:Observation, key cmobs:<id>
+  - .explore/source-ledger.jsonl records (one per line)                                  -> :Entity:Source
+All three group under a :Entity:Project node (key=project:<canon_project(name)>), linked PART_OF — the
 one relation this module writes, reused as-is from relations.yaml (arity:1, overflow_policy:reject;
 a 2nd DIFFERENT parent is refused, not silently re-anchored — matches the historical PART_OF decision
 already recorded in engram: "PART_OF kept reject not evict").
@@ -16,6 +18,12 @@ fixed namespace for every write this module makes means it never mismatches itse
 
 :Episodic provenance (ep=) is SKIPPED (ep=None everywhere) — no reader consumes it (etl.py's own
 decision, rqb 2026-06-22); wiring it here would polish unread code, not ship a read surface.
+
+Positional-key invariant: .explore/source-ledger.jsonl and .buildloop/run-ledger.jsonl are append-only
+BY CONTRACT — a line's index is its identity. ledger:<i>/runledger:<i> keys are positional POST-dead-
+letter (the index into ingest()'s filtered record list, not the raw file line number). Editing or
+reordering a past line desyncs that node's content from its already-frozen PART_OF edge (the edge
+still points at whatever index used to sit there).
 """
 import json
 import os
@@ -33,7 +41,9 @@ URI = os.environ.get("NEO4J_URI", "bolt://localhost:7688")
 AUTH = ("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain"))
 REPO_ROOT = Path(__file__).parent.parent.parent
 ENGRAM_DB = os.environ.get("ENGRAM_DB", str(Path.home() / ".engram" / "engram.db"))
+CLAUDE_MEM_DB = os.environ.get("CLAUDE_MEM_DB", str(Path.home() / ".claude-mem" / "claude-mem.db"))
 LEDGER = REPO_ROOT / ".explore" / "source-ledger.jsonl"
+RUN_LEDGER = REPO_ROOT / ".buildloop" / "run-ledger.jsonl"
 NOW_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -58,6 +68,34 @@ def _real_engram_rows(project="builder-guild"):
                     "SELECT id, type, title, content, project, scope, topic_key, created_at "
                     "FROM observations WHERE project=? ORDER BY id", (project,)).fetchall()
                 return [dict(r) for r in rows]
+            finally:
+                con.close()
+        except sqlite3.OperationalError as e:
+            last_err = e
+            if "locked" not in str(e).lower():
+                raise
+    raise last_err
+
+
+def _real_claude_mem_rows(project="buffalo"):
+    """claude-mem.db is LIVE (background worker) — same lock exposure as engram.db, same mitigation:
+    ro URI (never takes a write lock) + timeout=5.0 (busy_timeout) + one bounded retry on 'locked'.
+    narrative is renamed to content in the returned dict so rows match ingest()'s existing
+    row['content'] access unmodified (builder-guild-br7 — no new row shape for ingest() to learn).
+    Schema permits NULL title/narrative; a NULL row would ingest the literal 'None' string into
+    long_context rather than dead-letter (deliberate: mirrors engram's no-fallback posture; all
+    rows non-blank as of the 2026-07-03 checks, but the row count drifts live — 432→459→488)."""
+    last_err = None
+    for _attempt in range(2):
+        try:
+            con = sqlite3.connect(f"file:{CLAUDE_MEM_DB}?mode=ro", uri=True, timeout=5.0)   # ro URI: never takes a write lock
+            con.row_factory = sqlite3.Row
+            try:
+                rows = con.execute(
+                    "SELECT id, project, title, narrative FROM observations WHERE project=? ORDER BY id",
+                    (project,)).fetchall()
+                return [{"id": r["id"], "project": r["project"], "title": r["title"], "content": r["narrative"]}
+                        for r in rows]
             finally:
                 con.close()
         except sqlite3.OperationalError as e:
@@ -92,6 +130,16 @@ def _real_ledger_records():
     return records
 
 
+def _real_run_ledger_records():
+    if not RUN_LEDGER.exists():
+        return []
+    with RUN_LEDGER.open() as f:
+        records, deadletter = _parse_ledger_lines(f)
+    if deadletter:
+        print(f"[deadletter] run-ledger.jsonl: {len(deadletter)} corrupt line(s) skipped: {deadletter}")
+    return records
+
+
 # ── fixtures (hermetic, shaped like the real schemas) ────────────────────────
 def _fixture_rows():
     """String ids (not sqlite ints) so a fixture key can never collide with a real obs:<id> key
@@ -105,6 +153,21 @@ def _fixture_rows():
     ]
 
 
+def _fixture_claude_mem_rows():
+    """String ids + fixture-only project name — mirrors _fixture_rows(); a fixture key can never
+    collide with a real cmobs:<id> key regardless of run order between --selftest and --real.
+    id="1" doubles as the collision-proof fixture in _selftest(): same numeric id as the
+    engram-shaped collision row there, disambiguated only by obs_prefix — the ONE deliberately
+    numeric fixture id (spec-mandated); every other fixture id stays non-numeric (cmfx*) so it can
+    never look like a real sqlite autoincrement id on a fresh/low-count claude-mem.db."""
+    return [
+        {"id": "1", "title": "Claude-mem collision fixture", "content": "Claude-mem fixture content one.",
+         "project": "Fixture-Claude-Mem-Project"},
+        {"id": "cmfx2", "title": "Second claude-mem fixture", "content": "Claude-mem fixture content two.",
+         "project": "Fixture-Claude-Mem-Project"},
+    ]
+
+
 def _fixture_ledger():
     return [
         {"type": "run", "run_id": "fixture-run-1", "topic": "fixture topic", "ts": "2026-07-01T00:00:00Z"},
@@ -113,7 +176,36 @@ def _fixture_ledger():
     ]
 
 
+def _fixture_run_ledger():
+    """Ledger-shaped like real .buildloop/run-ledger.jsonl records (type+run_id; no claim/topic —
+    those belong to source-ledger's schema) — exercises the SHORT-LABEL FIX's 'reason'/'gate' arms.
+    >=2 records, >=2 distinct type values, one shared fixture run_id (builder-guild-0k9 AC1)."""
+    return [
+        {"type": "gate", "run_id": "fixture-runledger-1", "gate": "fixture-gate", "status": "PASS",
+         "ts": "2026-07-01T00:00:00Z"},
+        {"type": "pir", "run_id": "fixture-runledger-1", "reason": "fixture pir reason text",
+         "status": "pass", "ts": "2026-07-01T00:01:00Z"},
+    ]
+
+
 # ── ingest (the only writer: mutate.resolve_entity / mutate.apply_edge) ─────
+def _filter_ledger_records(records):
+    """The dead-letter predicate, extracted so ingest() (which persists ledger_prefix:<i> keys on
+    this filtered list) and _real()'s retrieval proofs (which must derive the SAME index to name
+    the SAME key) can never desync (P2 fix, codex-confirmed 2026-07-04) — same input always
+    produces the same good/bad split in the same order, so an index into `good` here is always the
+    index ingest() used to persist that record. A record missing run_id (or missing every one of
+    claim/topic/reason/gate/type — the whole short-label OR-chain) dead-letters."""
+    good, bad = [], []
+    for rec in records:
+        if rec.get("run_id") is None or not (rec.get("claim") or rec.get("topic")
+                                              or rec.get("reason") or rec.get("gate") or rec.get("type")):
+            bad.append(rec)
+        else:
+            good.append(rec)
+    return good, bad
+
+
 def _resolve_embeddable(tx, label, key, now, ns, short, long_):
     """Observation/Source resolve, PLUS content-change detection for the embed-resume filter (698).
     mutate.resolve_entity's ON-MATCH branch blindly overwrites long_context without touching
@@ -129,35 +221,50 @@ def _resolve_embeddable(tx, label, key, now, ns, short, long_):
         mutate.mark_dirty(tx, key, now)
 
 
-def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger"):
+def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger", obs_prefix="obs"):
     """Entities via mutate.resolve_entity (ONE tx — upsert has no reject axis, so it never rolls back
     on a rejected fact). Edges via mutate.apply_edge(PART_OF), ONE TX PER EDGE (mirrors etl.py's
     ingest()): PART_OF is arity:1+overflow:reject, so a single arity collision (e.g. a row's project
     reclassified between runs while its subject already has a current PART_OF elsewhere) raises
     ValueError — per-edge isolation dead-letters THAT fact instead of rolling back the whole corpus.
     Infra errors (neo4j.exceptions.*) are deliberately NOT caught — they propagate and halt, same as
-    etl.py. Returns the dead-letter list (empty = every edge applied).
+    etl.py. Returns the dead-letter list — edge rejects plus any ledger record missing run_id/type
+    (empty = every edge applied and every record well-formed).
     ZERO LLM. Idempotent: the same rows/ledger/now converges to the identical graph (resolve_entity
     never bumps content_rev on its own; apply_edge's MERGE re-matches the same current edge instead
     of duplicating; _resolve_embeddable only flips dirty when text actually differs).
     ledger_prefix keys each Source node as f'{ledger_prefix}:{line-index}' — default 'ledger' matches
     --real's line-index scheme; --selftest passes a distinct prefix so its fixture records can never
-    collide with a real ledger:<i> key regardless of run order between --selftest and --real."""
+    collide with a real ledger:<i> key regardless of run order between --selftest and --real.
+    obs_prefix keys each Observation node as f'{obs_prefix}:{row["id"]}' — default 'obs' (engram);
+    claude-mem rows pass 'cmobs' (builder-guild-br7) so a claude-mem id can never collide with an
+    engram id of the same numeric value in the same namespace.
+    A ledger record missing run_id (or missing every one of claim/topic/reason/gate/type — the whole
+    short-label OR-chain) is dead-lettered here (via module-level _filter_ledger_records — shared
+    with _real()'s proof-index computation, P2 fix), before either downstream loop subscripts it,
+    instead of KeyError-ing the whole entities tx. Filtering once up front (rather than guarding in
+    each of _entities and the edges comprehension below) keeps runledger:<i>/ledger:<i> positional
+    indices consistent between the two loops — both enumerate() the same post-filter list."""
+    good, bad = _filter_ledger_records(ledger)
+    if bad:
+        print(f"[deadletter] {len(bad)} ledger record(s) missing run_id/type skipped: {bad}")
+    ledger = good
+
     def _entities(tx):
         for row in rows:
-            _resolve_embeddable(tx, "Observation", f"obs:{row['id']}", now, ns,
+            _resolve_embeddable(tx, "Observation", f"{obs_prefix}:{row['id']}", now, ns,
                                 row["title"], f"{row['title']}\n\n{row['content']}")
             pkey = f"project:{canon_project(row['project'])}"
             mutate.resolve_entity(tx, "Project", pkey, now, ns, short=row["project"], long_=row["project"])
         for i, rec in enumerate(ledger):
-            short = rec.get("claim") or rec.get("topic") or rec["type"]
+            short = rec.get("claim") or rec.get("topic") or rec.get("reason") or rec.get("gate") or rec["type"]
             _resolve_embeddable(tx, "Source", f"{ledger_prefix}:{i}", now, ns,
                                 short, json.dumps(rec, sort_keys=True))
             pkey = f"project:{canon_project(rec['run_id'])}"
             mutate.resolve_entity(tx, "Project", pkey, now, ns, short=rec["run_id"], long_=rec["run_id"])
     session.execute_write(_entities)
 
-    edges = [(f"obs:{row['id']}", f"project:{canon_project(row['project'])}") for row in rows]
+    edges = [(f"{obs_prefix}:{row['id']}", f"project:{canon_project(row['project'])}") for row in rows]
     edges += [(f"{ledger_prefix}:{i}", f"project:{canon_project(rec['run_id'])}")
               for i, rec in enumerate(ledger)]
 
@@ -171,7 +278,7 @@ def ingest(session, rows, ledger, now, ns, ledger_prefix="ledger"):
             # infra errors (neo4j.exceptions.*) deliberately NOT caught — they propagate and halt.
     if deadletter:
         print(f"[deadletter] {len(deadletter)} PART_OF edge(s) rejected: {deadletter}")
-    return deadletter
+    return deadletter + bad
 
 
 def _embed_history_nodes(session, ns, now, reembed_all=False):
@@ -263,6 +370,128 @@ def _selftest():
             fail += [] if part_fx1 == "project:my-portfolio" else \
                 [f"arity:1 overflow:reject did not hold: current PART_OF re-anchored to {part_fx1}"]
 
+            # ── claude-mem ingest path (builder-guild-br7): same idempotent-re-run shape as the
+            # engram block above, exercised through the NEW obs_prefix param. ledger=[] throughout —
+            # claude-mem rows carry no ledger records of their own.
+            cm_rows = _fixture_claude_mem_rows()
+            cm_dl1 = ingest(s, cm_rows, [], T0, TNS, obs_prefix="cmobs")
+            cm_rev1 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'cmobs:1'}) RETURN n.content_rev AS r").single()["r"])
+            cm_edges1 = s.execute_read(lambda tx: tx.run(
+                "MATCH ()-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->() "
+                "WHERE r.invalid_at > datetime() RETURN count(r) AS c", ns=TNS).single()["c"])
+
+            cm_dl2 = ingest(s, cm_rows, [], T0, TNS, obs_prefix="cmobs")   # re-run: SAME fixtures + SAME now -> must be a no-op
+            cm_rev2 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'cmobs:1'}) RETURN n.content_rev AS r").single()["r"])
+            cm_edges2 = s.execute_read(lambda tx: tx.run(
+                "MATCH ()-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->() "
+                "WHERE r.invalid_at > datetime() RETURN count(r) AS c", ns=TNS).single()["c"])
+            print(f"[cm idempotent] content_rev {cm_rev1} -> {cm_rev2} | current PART_OF edges {cm_edges1} -> {cm_edges2}")
+            fail += [] if cm_rev1 == cm_rev2 else ["claude-mem content_rev changed across an identical re-ingest"]
+            fail += [] if cm_edges1 == cm_edges2 else ["claude-mem current PART_OF edge count changed across re-ingest"]
+            fail += [] if not (cm_dl1 or cm_dl2) else \
+                [f"unexpected dead-letter on the clean claude-mem fixture corpus: {cm_dl1 or cm_dl2}"]
+
+            # collision proof (clause a): an engram-shaped row and a claude-mem-shaped row (cm_rows[0]
+            # above) sharing the SAME numeric id "1" must resolve to two DISTINCT entities (obs:1 vs
+            # cmobs:1), each keeping its own fixture's title — proves the key scheme, not just "no crash".
+            engram_one = [{"id": "1", "type": "decision", "title": "Engram collision fixture",
+                           "content": "Engram collision content.", "project": "Fixture-Collision-Project",
+                           "scope": "project", "topic_key": "fx/collision", "created_at": T0}]
+            ingest(s, engram_one, [], T0, TNS, obs_prefix="obs")
+            obs1 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'obs:1'}) RETURN n.short_context AS t").single())
+            cmobs1 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'cmobs:1'}) RETURN n.short_context AS t").single())
+            print(f"[collision] obs:1 title={obs1['t'] if obs1 else None} | "
+                  f"cmobs:1 title={cmobs1['t'] if cmobs1 else None}")
+            fail += [] if (obs1 and obs1["t"] == "Engram collision fixture") else \
+                ["obs:1 missing or wrong title (collision on cmobs?)"]
+            fail += [] if (cmobs1 and cmobs1["t"] == "Claude-mem collision fixture") else \
+                ["cmobs:1 missing or wrong title (collision on obs?)"]
+            fail += [] if (obs1 and cmobs1 and obs1["t"] != cmobs1["t"]) else \
+                ["obs:1/cmobs:1 collapsed to one node — key scheme did not disambiguate"]
+
+            # per-row dead-letter on the cmobs path (orchestrator directive): reclassify cmobs:1's
+            # project -> PART_OF arity:1 overflow:reject collision must dead-letter, not raise;
+            # cm_rows[1]'s edge (unchanged project) still applies — same class as the engram reclassify
+            # proof above, run THROUGH obs_prefix="cmobs" to prove it at runtime, not by shared-code argument.
+            cm_reclassified = [dict(cm_rows[0], project="Fixture-Claude-Mem-Reclassified"), cm_rows[1]]
+            cm_dl3 = ingest(s, cm_reclassified, [], T1, TNS, obs_prefix="cmobs")
+            cm_part1 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'cmobs:1'})-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->(o) "
+                "WHERE r.invalid_at > datetime() RETURN o.key AS k", ns=TNS).single()["k"])
+            print(f"[deadletter] reclassified cmobs:1 -> dead-lettered={cm_dl3} | current PART_OF still={cm_part1}")
+            fail += [] if len(cm_dl3) == 1 else \
+                [f"expected exactly 1 claude-mem dead-letter from the arity reject, got {cm_dl3}"]
+            fail += [] if cm_part1 == "project:fixture-claude-mem-project" else \
+                [f"claude-mem arity:1 overflow:reject did not hold: current PART_OF re-anchored to {cm_part1}"]
+
+            # ── run-ledger ingest path (builder-guild-0k9): same idempotent-re-run + reclassify
+            # shapes as the claude-mem block above, threaded through ledger_prefix='runledgerfx'
+            # (never collides with real runledger:<i> regardless of run order vs --real). rows=[]
+            # throughout — run-ledger records carry no observation rows of their own.
+            rl_records = _fixture_run_ledger()
+            rl_dl1 = ingest(s, [], rl_records, T0, TNS, ledger_prefix="runledgerfx")
+            rl_rev1 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'runledgerfx:0'}) RETURN n.content_rev AS r").single()["r"])
+            rl_edges1 = s.execute_read(lambda tx: tx.run(
+                "MATCH ()-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->() "
+                "WHERE r.invalid_at > datetime() RETURN count(r) AS c", ns=TNS).single()["c"])
+
+            rl_dl2 = ingest(s, [], rl_records, T0, TNS, ledger_prefix="runledgerfx")   # re-run: SAME fixtures + SAME now -> must be a no-op
+            rl_rev2 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'runledgerfx:0'}) RETURN n.content_rev AS r").single()["r"])
+            rl_edges2 = s.execute_read(lambda tx: tx.run(
+                "MATCH ()-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->() "
+                "WHERE r.invalid_at > datetime() RETURN count(r) AS c", ns=TNS).single()["c"])
+            print(f"[runledger idempotent] content_rev {rl_rev1} -> {rl_rev2} | current PART_OF edges {rl_edges1} -> {rl_edges2}")
+            fail += [] if rl_rev1 == rl_rev2 else ["run-ledger content_rev changed across an identical re-ingest"]
+            fail += [] if rl_edges1 == rl_edges2 else ["run-ledger current PART_OF edge count changed across re-ingest"]
+            fail += [] if not (rl_dl1 or rl_dl2) else \
+                [f"unexpected dead-letter on the clean run-ledger fixture corpus: {rl_dl1 or rl_dl2}"]
+
+            rl_reclassified = [dict(rl_records[0], run_id="fixture-runledger-RECLASSIFIED"), rl_records[1]]
+            rl_dl3 = ingest(s, [], rl_reclassified, T1, TNS, ledger_prefix="runledgerfx")
+            rl_part0 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'runledgerfx:0'})-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->(o) "
+                "WHERE r.invalid_at > datetime() RETURN o.key AS k", ns=TNS).single()["k"])
+            print(f"[deadletter] reclassified runledgerfx:0 -> dead-lettered={rl_dl3} | current PART_OF still={rl_part0}")
+            fail += [] if len(rl_dl3) == 1 else \
+                [f"expected exactly 1 run-ledger dead-letter from the arity reject, got {rl_dl3}"]
+            fail += [] if rl_part0 == "project:fixture-runledger-1" else \
+                [f"run-ledger arity:1 overflow:reject did not hold: current PART_OF re-anchored to {rl_part0}"]
+
+            # FIX (P3-untested-deadletter-filter): prove the dead-letter filter itself, not just
+            # that ingest() didn't crash on the CLEAN fixture corpora above. Malformed records come
+            # FIRST in raw order — a regression back to raw-index keying (the P2 bug) would land
+            # the well-formed sibling on deadletterfx:2, not deadletterfx:0, so this fails loud
+            # instead of silently passing if ingest()/_real() ever desync again.
+            dlfix_records = [
+                {"type": "orphan", "ts": "2026-07-04T00:00:00Z"},                                   # missing run_id
+                {"run_id": "fixture-run-deadletter", "ts": "2026-07-04T00:01:00Z"},                 # missing claim/topic/reason/gate/type
+                {"type": "run", "run_id": "fixture-run-deadletter", "ts": "2026-07-04T00:02:00Z"},  # well-formed, raw index 2
+            ]
+            dlfix_good, dlfix_bad = _filter_ledger_records(dlfix_records)
+            dlfix_result = ingest(s, [], dlfix_records, T0, TNS, ledger_prefix="deadletterfx")
+            n_dlfix0 = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity {key:'deadletterfx:0'}) RETURN count(n) AS c").single()["c"])
+            n_dlfix_total = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity) WHERE n.namespace=$ns AND n.key STARTS WITH 'deadletterfx:' "
+                "RETURN count(n) AS c", ns=TNS).single()["c"])
+            print(f"[deadletter-filter] raw={len(dlfix_records)} filtered={len(dlfix_good)} "
+                  f"dead-lettered={len(dlfix_bad)} | deadletterfx:0 exists={n_dlfix0 == 1} | "
+                  f"total deadletterfx nodes={n_dlfix_total}")
+            fail += [] if len(dlfix_bad) == 2 else \
+                [f"expected 2 dead-lettered records (missing run_id + missing short-label fields), got {len(dlfix_bad)}"]
+            fail += [] if len(dlfix_result) == 2 else \
+                [f"ingest() did not surface both dead-lettered ledger records, got {dlfix_result}"]
+            fail += [] if n_dlfix0 == 1 else \
+                ["well-formed sibling did not land at post-filter index 0 (deadletterfx:0 missing)"]
+            fail += [] if n_dlfix_total == 1 else \
+                [f"expected exactly 1 persisted deadletterfx node (malformed ones must not persist), got {n_dlfix_total}"]
+
             s.execute_write(lambda tx: tx.run("MATCH (n) WHERE n.namespace=$ns DETACH DELETE n", ns=TNS))
 
     # FIX bc7/22w: one corrupt jsonl line must dead-letter, not abort the whole ledger read. Pure
@@ -299,18 +528,42 @@ def _real():
 
     rows = _real_engram_rows()
     ledger = _real_ledger_records()
-    print(f"[read] engram.db builder-guild rows={len(rows)} | source-ledger.jsonl records={len(ledger)}")
+    cm_rows = _real_claude_mem_rows()
+    run_ledger = _real_run_ledger_records()
+    print(f"[read] engram.db builder-guild rows={len(rows)} | source-ledger.jsonl records={len(ledger)} "
+          f"| claude-mem.db buffalo rows={len(cm_rows)} | run-ledger.jsonl records={len(run_ledger)}")
+
+    # P2 fix: ingest() persists ledger_prefix:<i> keys on its POST-FILTER index (dead-lettered
+    # records dropped before enumerate()) — any proof below that derives a key by list index must
+    # index into the SAME filtered view (same predicate, same input -> same split, so indices
+    # always match what ingest() actually persisted), not the raw just-read list.
+    ledger_good, ledger_bad = _filter_ledger_records(ledger)
+    run_ledger_good, run_ledger_bad = _filter_ledger_records(run_ledger)
+    if ledger_bad:
+        print(f"[read] source-ledger.jsonl dead-letter delta: raw={len(ledger)} "
+              f"filtered={len(ledger_good)} (-{len(ledger_bad)})")
+    if run_ledger_bad:
+        print(f"[read] run-ledger.jsonl dead-letter delta: raw={len(run_ledger)} "
+              f"filtered={len(run_ledger_good)} (-{len(run_ledger_bad)})")
 
     with GraphDatabase.driver(URI, auth=AUTH) as drv:
         drv.verify_connectivity()
         with drv.session() as s:
             ingest(s, rows, ledger, now, ns)
+            ingest(s, cm_rows, [], now, ns, obs_prefix="cmobs")
+            ingest(s, [], run_ledger, now, ns, ledger_prefix="runledger")
             n_embedded = _embed_history_nodes(s, ns, now, reembed_all=reembed_all)
             counts = s.execute_read(lambda tx: tx.run(
                 "MATCH (n:Entity) WHERE n.namespace=$ns RETURN labels(n) AS labels", ns=ns).data())
             n_edges = s.execute_read(lambda tx: tx.run(
                 "MATCH ()-[r:RELATES_TO {name:'PART_OF', namespace:$ns}]->() "
                 "WHERE r.invalid_at > datetime() RETURN count(r) AS c", ns=ns).single()["c"])
+            n_cm = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity) WHERE n.namespace=$ns AND n.key STARTS WITH 'cmobs:' "
+                "RETURN count(n) AS c", ns=ns).single()["c"])
+            n_runledger = s.execute_read(lambda tx: tx.run(
+                "MATCH (n:Entity) WHERE n.namespace=$ns AND n.key STARTS WITH 'runledger:' "
+                "RETURN count(n) AS c", ns=ns).single()["c"])
 
     n_obs = sum(1 for c in counts if "Observation" in c["labels"])
     n_src = sum(1 for c in counts if "Source" in c["labels"])
@@ -318,31 +571,72 @@ def _real():
     print(f"[embed]  embedded {n_embedded} Observation/Source nodes in ns={ns} "
           f"(mode={'reembed-all' if reembed_all else 'resume'})")
     print(f"[counts] history ns nodes: Observation={n_obs} Source={n_src} Project={n_proj} "
-          f"total={len(counts)} | current PART_OF edges={n_edges}")
+          f"total={len(counts)} | current PART_OF edges={n_edges} | claude-mem nodes ingested={n_cm} "
+          f"| run-ledger nodes ingested={n_runledger}")
 
     # pick the first real row with a NON-empty title (~1/3 of builder-guild rows have title='') —
     # a blank-title query would not be a meaningful "retrieve by real title" proof.
-    target = next((r for r in rows if r["title"]), None)
-    if target is None:
-        print("HISTORY_SERVE_FAIL: no real engram row has a non-empty title"); sys.exit(1)
-    target_key = f"obs:{target['id']}"
+    # A source with ZERO records (fresh clone, missing DB/file) SKIPs its proof rather than failing —
+    # there is nothing to retrieve. A source that HAS records but none qualifies (no non-empty title /
+    # no 'reason' field) still hard-fails below: that's records-exist-but-retrieval-misses, not empty.
+    if not rows:
+        print("[serve] SKIP engram proof (source empty)")
+    else:
+        target = next((r for r in rows if r["title"]), None)
+        if target is None:
+            print("HISTORY_SERVE_FAIL: no real engram row has a non-empty title"); sys.exit(1)
+        target_key = f"obs:{target['id']}"
 
-    # secondary assert (spec's original proof): direct key lookup -> existence + role-scoped visibility.
-    allowed = scope.allowed_namespaces("history")
-    card = serve_mod.node_card(target_key, allowed)
-    print(f"[node_card] key={target_key} -> node={card and card.get('node')}")
-    expect_long = f"{target['title']}\n\n{target['content']}"
-    fail += [] if (card and card["node"] == target_key and card["long_context"] == expect_long) \
-        else [f"node_card did not round-trip {target_key}"]
+        # secondary assert (spec's original proof): direct key lookup -> existence + role-scoped visibility.
+        allowed = scope.allowed_namespaces("history")
+        card = serve_mod.node_card(target_key, allowed)
+        print(f"[node_card] key={target_key} -> node={card and card.get('node')}")
+        expect_long = f"{target['title']}\n\n{target['content']}"
+        fail += [] if (card and card["node"] == target_key and card["long_context"] == expect_long) \
+            else [f"node_card did not round-trip {target_key}"]
 
-    # primary assert (orchestrator directive): an actual RETRIEVAL by the observation's real title —
-    # a free-text query, not a key lookup — is what node_card structurally cannot prove.
-    result = serve_mod.serve(query_text=target["title"], role="history")
-    in_evidence = (result["primary"] == target_key
-                   or any(target_key in line for line in result["composed_evidence"]))
-    print(f"[serve] query={target['title']!r} role=history -> primary={result['primary']} "
-          f"decision={result['decision']} | {target_key} in evidence={in_evidence}")
-    fail += [] if in_evidence else [f"serve() did not surface {target_key} for a query on its own real title"]
+        # primary assert (orchestrator directive): an actual RETRIEVAL by the observation's real title —
+        # a free-text query, not a key lookup — is what node_card structurally cannot prove.
+        result = serve_mod.serve(query_text=target["title"], role="history")
+        in_evidence = (result["primary"] == target_key
+                       or any(target_key in line for line in result["composed_evidence"]))
+        print(f"[serve] query={target['title']!r} role=history -> primary={result['primary']} "
+              f"decision={result['decision']} | {target_key} in evidence={in_evidence}")
+        fail += [] if in_evidence else [f"serve() did not surface {target_key} for a query on its own real title"]
+
+    # claude-mem retrieval proof (builder-guild-br7 clause e): same free-text-by-real-title proof,
+    # over a cmobs:-keyed node this time — one ingest() call, one obs_prefix, same serve() path.
+    if not cm_rows:
+        print("[serve] SKIP claude-mem proof (source empty)")
+    else:
+        cm_target = next((r for r in cm_rows if r["title"]), None)
+        if cm_target is None:
+            print("HISTORY_SERVE_FAIL: no real claude-mem row has a non-empty title"); sys.exit(1)
+        cm_target_key = f"cmobs:{cm_target['id']}"
+        cm_result = serve_mod.serve(query_text=cm_target["title"], role="history")
+        cm_in_evidence = (cm_result["primary"] == cm_target_key
+                          or any(cm_target_key in line for line in cm_result["composed_evidence"]))
+        print(f"[serve] query={cm_target['title']!r} role=history -> primary={cm_result['primary']} "
+              f"decision={cm_result['decision']} | {cm_target_key} in evidence={cm_in_evidence}")
+        fail += [] if cm_in_evidence else [f"serve() did not surface {cm_target_key} for a query on its own real title"]
+
+    # run-ledger retrieval proof (builder-guild-0k9): same free-text-by-real-label proof, over a
+    # runledger:-keyed Source node this time — picks a record whose post-fix short label is the
+    # non-degenerate 'reason' text (pir/route_up family), not the degenerate rec['type'] fallback.
+    if not run_ledger:
+        print("[serve] SKIP run-ledger proof (source empty)")
+    else:
+        rl_idx, rl_target = next(((i, r) for i, r in enumerate(run_ledger_good) if r.get("reason")), (None, None))
+        if rl_target is None:
+            print("HISTORY_SERVE_FAIL: no real run-ledger record has a 'reason' field"); sys.exit(1)
+        rl_target_key = f"runledger:{rl_idx}"
+        rl_label = rl_target["reason"]
+        rl_result = serve_mod.serve(query_text=rl_label, role="history")
+        rl_in_evidence = (rl_result["primary"] == rl_target_key
+                          or any(rl_target_key in line for line in rl_result["composed_evidence"]))
+        print(f"[serve] query={rl_label!r} role=history -> primary={rl_result['primary']} "
+              f"decision={rl_result['decision']} | {rl_target_key} in evidence={rl_in_evidence}")
+        fail += [] if rl_in_evidence else [f"serve() did not surface {rl_target_key} for a query on its own real reason label"]
 
     print("LLM calls in path: 0 (sqlite3/json read + mutate.py write engine + local EmbeddingGemma embed)")
     if fail:
