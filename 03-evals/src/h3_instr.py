@@ -13,6 +13,8 @@ NOTE (honest): no Langfuse server is running in this environment, so LangfuseSin
 SDK but nothing is received remotely. The schema + read-only guarantee are verified via CaptureSink;
 LangfuseSink is exercised to prove the real client binds and accepts the schema.
 """
+
+import os
 import sys
 import time
 
@@ -52,9 +54,12 @@ class LangfuseSink:
     def __init__(self):
         from langfuse import Langfuse
         # dummy creds + local host; no server running -> events are accepted by the SDK then dropped at flush
-        self.client = Langfuse(public_key="pk-h3-phaseA", secret_key="sk-h3-phaseA",
-                               host="http://localhost:3000")
-
+        self.client = Langfuse(
+            public_key=os.environ.get("LANGFUSE_PUBLIC_KEY", "demo-placeholder"),
+            secret_key=os.environ.get("LANGFUSE_SECRET_KEY", "demo-placeholder"),
+            host="http://localhost:3000"
+            )
+                                  
     def emit(self, name, inputs, output, scores):
         tid = self.client.create_trace_id()
         self.client.create_event(trace_context={"trace_id": tid}, name=name,
