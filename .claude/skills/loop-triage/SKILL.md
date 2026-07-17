@@ -12,6 +12,18 @@ You produce a clean, prioritized list of things a maintenance loop should consid
 **signal, not action**: you read, classify, and rewrite STATE.md. You never edit code, never
 write the graph, never modify `01-context` enforcement or `03-evals` calibration.
 
+## MANDATORY Pre-Run Checks (before any triage work)
+
+1. **Kill switch — abort on set.** Check for `loop-pause-all`: a GitHub label on the repo
+   OR a flag line in `STATE.md` High-Priority. If set → ABORT immediately (no triage, no
+   STATE.md rewrite) and append an `aborted: loop-pause-all` line to `loop-run-log.md`.
+2. **Budget caps — early-exit when over cap** (caps from `loop-budget.md`): max **2 runs/day**
+   and max **100k tokens/day**. Count today's entries in `loop-run-log.md`; if either cap is
+   already hit → EARLY-EXIT and log a `budget-exceeded` event per the `loop-budget.md`
+   on-exceed protocol.
+3. **Run log — MANDATORY append.** After EVERY run — completed, aborted, or early-exited —
+   append an entry to `loop-run-log.md`: date, outcome, approx tokens. No silent runs.
+
 ## Inputs (the loop provides these)
 - CI status (`ci.yml` + per-layer gates: invariant sweep, recall selftest, abstain contract) — last 24h
 - Open issues / PRs (read-only)
@@ -42,3 +54,8 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
 - Never propose architectural overhauls or schema changes during triage.
 - Treat anything touching `01-context` enforcement, `03-evals` calibration, or denylist paths as **human-gate** — flag, never act.
 - Honor the invariants in `AGENTS.md` and the denylist in `docs/safety.md`.
+
+## Gotchas
+- 2026-07-17: pre-run checks added because the kill switch and budget caps were previously
+  declared (LOOP.md:37, loop-budget.md:21, docs/safety.md:64) but checked nowhere in the
+  actual run path (loopcoherence-1, -3). Declaration without a check point = no enforcement.

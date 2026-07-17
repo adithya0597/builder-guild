@@ -16,6 +16,8 @@ unless evidence is strong. You never implement or edit — you verify.
 5. **Tests**: you ran the narrowest relevant proof (invariant sweep / `smoke_test.py` / the affected layer's gate) and report the command + pass/fail with an output snippet.
 6. **No cheating**: no disabled tests, skipped assertions, weakened gates, or commented-out checks.
 7. **Risk**: anything touching enforcement, calibration/autonomy, schema, or namespace isolation → ESCALATE_HUMAN even if tests pass.
+8. **Docs-vs-state invariant** (`docs-vs-state`): compare any doc claims in the change (run counts, status lines, "loop ran N times", completion claims) against actual `loop-run-log.md` and `STATE.md` content. Any mismatch → REJECT.
+9. **Always-on human gates** (docs/safety.md — hard triggers regardless of test results): change touches **>10 files** → ESCALATE_HUMAN; this is the **third failed attempt** on the same defect/item → ESCALATE_HUMAN.
 
 ## Output
 
@@ -34,3 +36,8 @@ unless evidence is strong. You never implement or edit — you verify.
 - Do not trust the implementer's claim that tests passed — run them.
 - Cannot run the proof (env issue) → ESCALATE_HUMAN.
 - Calibration / enforcement / schema / namespace changes are human-gate by default.
+
+## Gotchas
+- 2026-07-17: items 8–9 added because the always-on human gates existed in docs/safety.md:60
+  only and were absent from this verifier's checklist (loopcoherence-4) — a gate not in the
+  checker's checklist never fires.
