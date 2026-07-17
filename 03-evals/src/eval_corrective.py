@@ -352,14 +352,15 @@ def t7_web_regrade_segregated():
 
 def _check_neo4j():
     """Fail fast with a clear dependency message if the live graph (T1-T4) is unreachable."""
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7688")
     try:
         from neo4j import GraphDatabase
-        drv = GraphDatabase.driver(os.environ.get("NEO4J_URI", "bolt://localhost:7688"), auth=("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain")))
+        drv = GraphDatabase.driver(uri, auth=("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain")))
         drv.verify_connectivity()
         drv.close()
         return True
     except Exception as e:
-        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7688 ({type(e).__name__}: {e}).")
+        print(f"DEPENDENCY: Neo4j unreachable at {uri} ({type(e).__name__}: {e}).")
         print("  T1-T4 are LIVE integration tests against the seeded ACME graph; bring it up first:")
         print("    docker compose -f 01-context/docker-compose.yml up -d   (+ seed the graph)")
         print("  (T5 web $0-or-STOP and T6 web-off are standalone unit tests and need no Neo4j.)")
