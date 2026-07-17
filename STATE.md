@@ -14,9 +14,10 @@ gate (see LOOP.md, docs/safety.md).
 
 <!-- Lower urgency; report-only. -->
 
-- [ ] **Loop branch unmerged + `.claude/` tracking collision** — `feat/loop-engineering-v3` is 3 commits
-  ahead of `origin/main` (loop scaffolding + docs; includes non-docs loop scaffolding), no open PR;
-  HANDOFF.md flags a `.claude/` symlink-vs-tracked collision to resolve before merging to `main`.
+- [ ] **Loop branch unmerged + `.claude/` tracking collision** — `feat/loop-engineering-v3` carries the
+  loop scaffolding plus the bl-20260717 fix sweep (docs-truth + eval/tooling fixes under `03-evals`,
+  `tools/`, `01-context/setup_a2.sh`, `.env.example`), no open PR; HANDOFF.md flags a `.claude/`
+  symlink-vs-tracked collision to resolve before merging to `main`.
   Observed artifact: untracked `.claude/.claude` nested symlink.
   Suggested loop action: report-only; **human-gate** (merge decision + `.claude/` ownership). Do not auto-resolve.
 - PR #13 `docs(roadmap): reconcile gate-state numbers to CASE_STUDY` was CLOSED unmerged 2026-07-13 — no watch.
@@ -29,7 +30,9 @@ gate (see LOOP.md, docs/safety.md).
 - Bi-temporal validity (current = `invalid_at > now`): green — stamp/reconcile gates (ci.yml:137-140).
 - Single-current + cycle sweeps: green — invariant_check + cycle_check (+ self-tests) (ci.yml:109-115).
 - Deterministic-write invariant (no LLM-authored facts): green — write-gateway gate (ci.yml:56, `WRITE_GATEWAY_OK`).
-- Not re-run on loop branch: loop delta is docs/scaffolding only (0 files under `01-context`/`02-agents`/`03-evals`).
+- Not re-run on loop branch: the bl-20260717 fix sweep touches `03-evals`, `tools/`, and
+  `01-context/setup_a2.sh` (diagnostic/doc-truth fixes, `py_compile`-verified locally) — full graph
+  gates run on the PR (CI fires on `pull_request`) and must be green before merge.
 
 ## Eval / Calibration Status (03-evals)
 <!-- Denylist path — human-gate, never loop-act. Autonomy off until a role is calibrated in code. -->
@@ -43,8 +46,9 @@ gate (see LOOP.md, docs/safety.md).
 - Per-layer gates in the green run: import smoke, DB-free contract demos (evidence/pageindex), write-gateway,
   spine/mutate/deadedge, invariant + cycle sweeps (+ self-tests), sentinel guard, read-path gates
   (scope/epist/abstain/gate/stamp/reconcile), recall + retention self-tests.
-- Loop branch `feat/loop-engineering-v3`: **no CI run** (CI fires on `push:main` + `pull_request`; no open PR).
-  Acceptable — loop-scaffolding delta, no product code.
+- Loop branch `feat/loop-engineering-v3`: **no CI run yet** (CI fires on `push:main` + `pull_request`; no open PR).
+  Branch carries eval/tooling fixes (bl-20260717) — the PR's CI run is the gate; locally only
+  `py_compile` + targeted greps were run.
 
 ## Recent Noise (ignored this run)
 

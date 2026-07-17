@@ -13,7 +13,7 @@
 > (its pass items have near-zero variance in the new coverage signal → unstable weight).
 > The public deliverable proves the signal is deterministic and no longer anti-correlated
 > BY CONSTRUCTION — it does NOT claim the selective-accuracy gain was achieved.
-> The +gain requires the **private 6-role golden** (this file, validated) + **the local Neo4j graph** +
+> The +gain requires the **private 3-role golden** (this file, validated) + **the local Neo4j graph** +
 > **real judge sweep** (cal3 → cal4 → evidence packet) → founder gate.
 > Do NOT write any code or doc that claims the gain was achieved in this G3 commit.
 

@@ -7,8 +7,8 @@
 
 Make Builder Guild legible to **loop engineering** (cobusgreyling/loop-engineering): set it up to
 be maintained by recurring, stateful, verified agent loops, starting at **L1 (report-only)**. This
-branch adds only loop scaffolding — no product code changed (`01-context` / `02-agents` / `03-evals`
-untouched).
+branch adds the loop scaffolding plus the bl-20260717 fix sweep — docs-truth reconciliation and
+eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, and `.env.example`.
 
 ## Current Progress
 
@@ -47,7 +47,7 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 
 ## Next Steps
 
-1. **Run the loop once to earn real L1.** In a Conductor workspace on this branch:
+1. **Run the loop again to earn operational L1** (the single logged run, 2026-06-29T15:57:35Z, predates this branch). In a Conductor workspace on this branch:
    `/loop 1d Run loop-triage. Update STATE.md. No code edits.` Let it rewrite `STATE.md`, then append
    one honest entry to `loop-run-log.md` and commit. That converts "L1 setup" into "L1 operational".
 2. **Resolve the `.claude/` merge collision — BEFORE merging to `main`.** The
@@ -70,13 +70,15 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 
 ## Key Files Modified
 
-This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added:
+This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added (loop scaffolding):
 `STATE.md`, `LOOP.md`, `AGENTS.md`, `loop-budget.md`, `loop-run-log.md`, `docs/safety.md`,
-`.claude/skills/loop-triage/SKILL.md`, `.claude/agents/loop-verifier.md`.
+`.claude/skills/loop-triage/SKILL.md`, `.claude/agents/loop-verifier.md`. Modified (bl-20260717 fix
+sweep): the scaffolding docs above plus `03-evals/src/{eval_corrective,eval_planner,eval_ocr,h3_instr,test_g3,golden_v1_draft}.py`,
+`03-evals/golden_v1_review.md`, `tools/run_guard.py`, `01-context/setup_a2.sh`, `.env.example`.
 
-## Branch graph (verified)
+## Branch graph (as of the bl-20260717 close; exact tip = `git rev-parse HEAD`)
 
-- `feat/loop-engineering-v3` → `0aff6ed` — this work; main `3096310` + 3 commits (`8d71cf9`, `d2ef3b2`, `0aff6ed`).
+- `feat/loop-engineering-v3` — this work: `main` (`3096310`) + loop scaffolding (`8d71cf9`, `d2ef3b2`, `0aff6ed`) + the bl-20260717 fix commits.
 - `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
