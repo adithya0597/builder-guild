@@ -22,10 +22,10 @@ evaluation layer. Hard layer boundary — do not blur:
 ## Build & verify
 
 ```bash
-cd 01-context && docker compose up -d        # Neo4j (community)
-bash setup_a2.sh                             # venv + driver + smoke
-pip install -r requirements.txt -r requirements-dev.txt
-python 01-context/smoke_test.py              # fastest write/read sanity
+docker compose -f 01-context/docker-compose.yml up -d   # Neo4j (community)
+bash 01-context/setup_a2.sh                              # venv + driver + smoke
+pip install -r requirements.txt -r requirements-dev.txt  # repo-root requirements
+python 01-context/smoke_test.py                          # fastest write/read sanity
 ```
 
 No single application test suite; quality gates are per-layer (invariant sweep, recall

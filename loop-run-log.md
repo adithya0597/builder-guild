@@ -2,9 +2,9 @@
 
 Append one JSON entry per loop run. Prune entries older than 30 days.
 
-**No automated runs yet.** This is the run-history spine for the daily-triage loop. It stays
-empty until a real loop run appends here. A heuristic "activity" signal (e.g. the word "audit"
-in git history) is **not** a run and must not be recorded as one.
+One run logged (2026-06-29T15:57:35Z, report-only); zero automated runs since. This is the
+run-history spine for the daily-triage loop; entries append below. A heuristic "activity"
+signal (e.g. the word "audit" in git history) is **not** a run and must not be recorded as one.
 
 ## Format
 

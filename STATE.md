@@ -1,6 +1,6 @@
 # Loop State — Builder Guild
 
-Last run: 2026-06-29T15:57:35Z · daily-triage · L1 report-only · branch `feat/loop-engineering-v1`
+Last run: 2026-06-29T15:57:35Z · daily-triage · L1 report-only · branch `feat/loop-engineering-v3`
 
 Durable memory spine for Builder Guild's maintenance loops. The daily-triage loop reads and
 rewrites this file each run. Humans review it; the loop never acts on code without a human
@@ -14,22 +14,21 @@ gate (see LOOP.md, docs/safety.md).
 
 <!-- Lower urgency; report-only. -->
 
-- [ ] **Loop branch unmerged + `.claude/` tracking collision** — `feat/loop-engineering-v1` is 2 commits
-  ahead of `origin/main` (docs-only, +428 lines / 9 files), no open PR; HANDOFF.md flags a `.claude/`
-  symlink-vs-tracked collision to resolve before merging to `main`. Observed artifact: untracked
-  `.claude/.claude` nested symlink.
+- [ ] **Loop branch unmerged + `.claude/` tracking collision** — `feat/loop-engineering-v3` is 3 commits
+  ahead of `origin/main` (loop scaffolding + docs; includes non-docs loop scaffolding), no open PR;
+  HANDOFF.md flags a `.claude/` symlink-vs-tracked collision to resolve before merging to `main`.
+  Observed artifact: untracked `.claude/.claude` nested symlink.
   Suggested loop action: report-only; **human-gate** (merge decision + `.claude/` ownership). Do not auto-resolve.
-- [ ] **Open PR #13** `docs(roadmap): reconcile gate-state numbers to CASE_STUDY` — different branch,
-  CI green 6/6, awaiting human merge.
-  Suggested loop action: none; **human-merge**. Read-only watch.
+- PR #13 `docs(roadmap): reconcile gate-state numbers to CASE_STUDY` was CLOSED unmerged 2026-07-13 — no watch.
 
 ## Graph & Invariant Health
 <!-- Source of truth = ci.yml graph job (real Neo4j). Job success ⟹ every gate's grep matched (set -e). -->
-- Source: CI run `28139965679` (success · 2026-06-25T01:06Z · sha `61f7395` = current `origin/main` HEAD).
-- Namespace isolation (node + edge): green — mutate/namespace-isolation gate (ci.yml:89, `E1_MUT_OK`).
-- Bi-temporal validity (current = `invalid_at > now`): green — stamp/reconcile gates (ci.yml:115-118).
-- Single-current + cycle sweeps: green — invariant_check + cycle_check (+ self-tests) (ci.yml:93-100).
-- Deterministic-write invariant (no LLM-authored facts): green — write-gateway gate (ci.yml:52, `WRITE_GATEWAY_OK`).
+- Source: CI run `28139965679` (success · 2026-06-25T01:06Z · sha `61f7395` = then-`origin/main` HEAD;
+  current `origin/main` is `3096310`, branch rebased onto it).
+- Namespace isolation (node + edge): green — mutate/namespace-isolation gate (ci.yml:106, `E1_MUT_OK`).
+- Bi-temporal validity (current = `invalid_at > now`): green — stamp/reconcile gates (ci.yml:137-140).
+- Single-current + cycle sweeps: green — invariant_check + cycle_check (+ self-tests) (ci.yml:109-115).
+- Deterministic-write invariant (no LLM-authored facts): green — write-gateway gate (ci.yml:56, `WRITE_GATEWAY_OK`).
 - Not re-run on loop branch: loop delta is docs/scaffolding only (0 files under `01-context`/`02-agents`/`03-evals`).
 
 ## Eval / Calibration Status (03-evals)
@@ -39,13 +38,13 @@ gate (see LOOP.md, docs/safety.md).
 - Last calibration verdict: see `03-evals/CASE_STUDY_calibration.md`. No regression this run.
 
 ## CI Gates
-<!-- ci.yml = only gate workflow on this branch: smoke (DB-free) + graph (Neo4j). -->
-- Last main CI: **success** — run `28139965679` · 2026-06-25T01:06Z · sha `61f7395`.
+<!-- .github/workflows/ has ci.yml + cla.yml + pr-gate.yml; ci.yml carries the per-layer graph gates: smoke (DB-free) + graph (Neo4j). -->
+- Last main CI: **success** — run `28139965679` · 2026-06-25T01:06Z · sha `61f7395` (then-main; current origin/main `3096310`).
 - Per-layer gates in the green run: import smoke, DB-free contract demos (evidence/pageindex), write-gateway,
   spine/mutate/deadedge, invariant + cycle sweeps (+ self-tests), sentinel guard, read-path gates
   (scope/epist/abstain/gate/stamp/reconcile), recall + retention self-tests.
-- Loop branch `feat/loop-engineering-v1`: **no CI run** (CI fires on `push:main` + `pull_request`; no open PR).
-  Acceptable — docs-only delta, no product code.
+- Loop branch `feat/loop-engineering-v3`: **no CI run** (CI fires on `push:main` + `pull_request`; no open PR).
+  Acceptable — loop-scaffolding delta, no product code.
 
 ## Recent Noise (ignored this run)
 

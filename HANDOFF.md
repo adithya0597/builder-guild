@@ -1,4 +1,4 @@
-# HANDOFF — `feat/loop-engineering`
+# HANDOFF — `feat/loop-engineering-v3`
 
 > Branch working doc for picking this up in a Conductor workspace. Not intended for `main` —
 > remove or relocate before merging this branch.
@@ -12,7 +12,7 @@ untouched).
 
 ## Current Progress
 
-L1 loop setup committed on this branch (`feat/loop-engineering`, commit `4081b7a`, 8 files, +341
+L1 loop setup committed on this branch (`feat/loop-engineering-v3`, commit `8d71cf9`, 8 files, +341
 lines), scoped to Builder Guild's real domain (layer boundary + invariants + calibration), grounded
 in the loop-engineering repo's own templates:
 
@@ -22,21 +22,21 @@ in the loop-engineering repo's own templates:
 - `.claude/skills/loop-triage/SKILL.md` — signal-only triage skill (rewrites `STATE.md`, never edits code).
 - `.claude/agents/loop-verifier.md` — maker/checker, default **REJECT**, runs the narrowest proof.
 - `docs/safety.md` — denylist (`01-context` enforcement, `03-evals` calibration), no-auto-merge, human gates, MCP least-privilege, kill switch.
-- `loop-budget.md` + `loop-run-log.md` — cost-observability spine. **Run log is intentionally empty.**
+- `loop-budget.md` + `loop-run-log.md` — cost-observability spine. **Run log holds one honest entry (2026-06-29T15:57:35Z).**
 
 ## Status (honest)
 
-**L1-setup, pre-run.** No loop has executed yet. `loop-audit` would score this ~100/100 and may read
-**L3**, because its activity heuristic counts the words "triage"/"last run" found in `STATE.md` prose —
-a known false positive. The run log is empty by design so that heuristic isn't laundered into an L3
-claim. **It is genuinely L1 until a real loop run is logged.**
+**L1, one run logged.** One report-only run logged 2026-06-29T15:57:35Z; no automated runs since.
+`loop-audit` would score this ~100/100 and may read **L3**, because its activity heuristic counts
+the words "triage"/"last run" found in `STATE.md` prose — a known false positive. The run log holds
+only that one honest entry so the heuristic isn't laundered into an L3 claim. **It is genuinely L1.**
 
 ## What Worked
 
 - Grounding every artifact in the loop-engineering repo's actual templates — names match what
   `loop-audit` detects (`loop-triage`, `loop-verifier`, `STATE.md`, `LOOP.md`, …).
 - Branching from `main` (clean, independently mergeable) rather than from the docs branch.
-- Keeping `loop-run-log.md` empty + the `LOOP.md` maturity note honest about L1-vs-L3.
+- Keeping `loop-run-log.md` limited to real entries + the `LOOP.md` maturity note honest about L1-vs-L3.
 
 ## What Didn't Work / Avoid
 
@@ -57,7 +57,7 @@ claim. **It is genuinely L1 until a real loop run is logged.**
    `.claude/`. Recommended: let the repo own `.claude/` — drop the `.claude` gitignore line and the
    `ln -sfn … .claude` setup line; the committed `.claude/` then travels to Conductor worktrees
    natively, and the global `~/.claude` discipline travels anyway.
-3. **Merge** `feat/loop-engineering` → `main` (and the docs branch → `main`) when ready. That also
+3. **Merge** `feat/loop-engineering-v3` → `main` (and the docs branch → `main`) when ready. That also
    moves Builder Guild's canonical loop-audit score off the `main` floor.
 4. (Optional) Remove this `HANDOFF.md` before merging to `main`.
 
@@ -76,8 +76,8 @@ This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Add
 
 ## Branch graph (verified)
 
-- `feat/loop-engineering` → `4081b7a` — this work; **local only, not pushed**.
-- `main` → `61f7395` — untouched.
+- `feat/loop-engineering-v3` → `0aff6ed` — this work; main `3096310` + 3 commits (`8d71cf9`, `d2ef3b2`, `0aff6ed`).
+- `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
 ## Tracker Delta (beads)
