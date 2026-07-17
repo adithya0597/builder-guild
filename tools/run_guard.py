@@ -37,7 +37,7 @@ def self_test():
     """Prove the runner FAILS on a violation: inject one NULL-invalid_at edge (the exact thing the 07
     guard forbids) in an isolated namespace, run the guard predicate, assert it returns rows, clean up
     (finally). WRITES to '_guard_selftest' only; the handwritten edge is an intentional adversarial
-    fixture (tools/ is not on the write-gateway scan path)."""
+    fixture (tools/ IS on check_write_gateway.py's SCAN_DIRS; this file is exempt via its ALLOWLIST)."""
     ns = "_guard_selftest"
     guard = ("MATCH (s {namespace:$ns})-[r:RELATES_TO]->(o) WHERE r.invalid_at IS NULL RETURN r LIMIT 5")
     with GraphDatabase.driver(URI, auth=AUTH) as drv:
