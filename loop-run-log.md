@@ -17,7 +17,8 @@ signal (e.g. the word "audit" in git history) is **not** a run and must not be r
   "actions_taken": 0,
   "escalations": 0,
   "tokens_estimate": 0,
-  "outcome": "report-only | fix-proposed | escalated | no-op"
+  "outcome": "report-only | fix-proposed | escalated | no-op",
+  "reason": "<optional; only on aborted/early-exited runs: loop-pause-all | budget-exceeded>"
 }
 ```
 
