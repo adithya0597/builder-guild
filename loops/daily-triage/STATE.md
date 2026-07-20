@@ -4,7 +4,7 @@ Last run: 2026-06-29T15:57:35Z · daily-triage · L1 report-only · branch `feat
 
 Durable memory spine for Builder Guild's maintenance loops. The daily-triage loop reads and
 rewrites this file each run. Humans review it; the loop never acts on code without a human
-gate (see LOOP.md, docs/safety.md).
+gate (see LOOP.md, loops/safety.md).
 
 ## High Priority (loop acting or waiting on human)
 
@@ -53,9 +53,9 @@ gate (see LOOP.md, docs/safety.md).
 ## Recent Noise (ignored this run)
 
 - Untracked `.claude/.claude` nested symlink — artifact of the documented `.claude/` collision (tied to Watch
-  item above; not committed — this run's commit is scoped to STATE.md + loop-run-log.md).
+  item above; not committed — that run's commit touched only the state + run-log files, then at repo root).
 - Merged PRs #4–#12 — historical, all CI-green; no action.
 - "Scheduled" entry in `gh run list` history — not part of ci.yml gates on this branch; not a finding.
 
 ---
-Run log: see `loop-run-log.md` | (timestamp) | findings | actions | escalations
+Run log: see `run-log.md` | (timestamp) | findings | actions | escalations

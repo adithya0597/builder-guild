@@ -28,13 +28,13 @@ L1 loop setup committed on this branch (originally commit `8d71cf9`, 8 files, +3
 lines), scoped to Builder Guild's real domain (layer boundary + invariants + calibration), grounded
 in the loop-engineering repo's own templates:
 
-- `STATE.md` — durable loop memory (graph/invariant health, eval/calibration status, CI gates).
-- `LOOP.md` — daily-triage **L1 report-only** config: human gates, worktrees, MCP scope, budget, safety.
+- `loops/daily-triage/STATE.md` — durable loop memory (graph/invariant health, eval/calibration status, CI gates).
+- `loops/daily-triage/LOOP.md` — daily-triage **L1 report-only** config: human gates, worktrees, MCP scope, budget, safety.
 - `AGENTS.md` — build/verify commands, core invariants, review norms, loop operation.
 - `.claude/skills/loop-triage/SKILL.md` — signal-only triage skill (rewrites `STATE.md`, never edits code).
 - `.claude/agents/loop-verifier.md` — maker/checker, default **REJECT**, runs the narrowest proof.
-- `docs/safety.md` — denylist (`01-context` enforcement, `03-evals` calibration), no-auto-merge, human gates, MCP least-privilege, kill switch.
-- `loop-budget.md` + `loop-run-log.md` — cost-observability spine. **Run log holds one honest entry (2026-06-29T15:57:35Z).**
+- `loops/safety.md` — denylist (`01-context` enforcement, `03-evals` calibration), no-auto-merge, human gates, MCP least-privilege, kill switch.
+- `loops/daily-triage/budget.md` + `run-log.md` — cost-observability spine. **Run log holds one honest entry (2026-06-29T15:57:35Z).**
 
 ## Status (honest)
 
@@ -48,14 +48,14 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 - Grounding every artifact in the loop-engineering repo's actual templates — names match what
   `loop-audit` detects (`loop-triage`, `loop-verifier`, `STATE.md`, `LOOP.md`, …).
 - Branching from `main` (clean, independently mergeable) rather than from the docs branch.
-- Keeping `loop-run-log.md` limited to real entries + the `LOOP.md` maturity note honest about L1-vs-L3.
+- Keeping `loops/daily-triage/run-log.md` limited to real entries + the `LOOP.md` maturity note honest about L1-vs-L3.
 
 ## What Didn't Work / Avoid
 
-- Do NOT seed `loop-run-log.md` with fake entries to reach L3 — that is the framework's own
+- Do NOT seed `loops/daily-triage/run-log.md` with fake entries to reach L3 — that is the framework's own
   anti-pattern ("L3 before L1 quality") and defeats the purpose.
 - Do NOT let the triage loop touch `01-context` enforcement or `03-evals` calibration — human-gate
-  only (see `docs/safety.md`).
+  only (see `loops/safety.md`).
 
 ## Next Steps
 
@@ -68,8 +68,8 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
    invocation on an actual diff; committed run evidence. These five convert the DA teardown's
    "2/10 operational, self-certification" findings into enforced properties.
 1. **Run the loop again to earn operational L1** (the single logged run, 2026-06-29T15:57:35Z, predates this branch). In a Conductor workspace on this branch:
-   `/loop 1d Run loop-triage. Update STATE.md. No code edits.` Let it rewrite `STATE.md`, then append
-   one honest entry to `loop-run-log.md` and commit. That converts "L1 setup" into "L1 operational".
+   `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` Let it rewrite the state file, then append
+   one honest entry to `loops/daily-triage/run-log.md` and commit. That converts "L1 setup" into "L1 operational".
 2. **Resolve the `.claude/` merge collision — BEFORE merging to `main`.** The
    `docs/reconcile-roadmap-calibration` branch gitignores `.claude` and symlinks it (Conductor
    monorepo-harness symlink, set in the gitignored `.conductor/settings.local.toml`). This branch
@@ -83,15 +83,14 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 
 ## Open Questions
 
-- Keep the loop scaffolding (`STATE.md`, `LOOP.md`, …) at the repo root of a public product repo, or
-  relocate under a `loop/` or `.conductor/` namespace before merge?
+- ~~Keep the loop scaffolding at repo root, or relocate?~~ **RESOLVED 2026-07-20: relocated under `loops/`** — per-loop folder `loops/daily-triage/{LOOP,STATE,run-log,budget}.md` + shared `loops/safety.md`; skills/agents stay under `.claude/` (harness discovery).
 - Once `.claude/` is repo-owned, do you still want the monorepo `~/.claude` harness in worktrees (it
   travels via the global layer anyway), or fully retire the symlink?
 
 ## Key Files Modified
 
-This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added (loop scaffolding):
-`STATE.md`, `LOOP.md`, `AGENTS.md`, `loop-budget.md`, `loop-run-log.md`, `docs/safety.md`,
+This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added (loop scaffolding; relocated 2026-07-20 into `loops/`):
+`loops/daily-triage/{LOOP.md,STATE.md,run-log.md,budget.md}`, `loops/safety.md`, `AGENTS.md`,
 `.claude/skills/loop-triage/SKILL.md`, `.claude/agents/loop-verifier.md`. Modified (bl-20260717 fix
 sweep): the scaffolding docs above plus `03-evals/src/{eval_corrective,eval_planner,eval_ocr,h3_instr,test_g3,golden_v1_draft}.py`,
 `03-evals/golden_v1_review.md`, `tools/run_guard.py`, `01-context/setup_a2.sh`, `.env.example`.

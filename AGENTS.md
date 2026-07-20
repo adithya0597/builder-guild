@@ -1,7 +1,7 @@
 # AGENTS.md — Builder Guild
 
 Conventions for humans and loops working in this repository. See also `README.md` (product +
-status), `CONTRIBUTING.md` (invariants), and `LOOP.md` (how loops operate here).
+status), `CONTRIBUTING.md` (invariants), and `loops/daily-triage/LOOP.md` (how loops operate here).
 
 ## What this repo is
 
@@ -42,6 +42,6 @@ selftest, abstain contract — see `.github/workflows/ci.yml`).
 
 ## Loop operation (this repo)
 
-- Daily triage: `loop-triage` skill → `STATE.md` (report-only, L1).
+- Daily triage: `loop-triage` skill → `loops/daily-triage/STATE.md` (report-only, L1).
 - Assisted fixes (L2): `loop-verifier` agent (maker/checker, default REJECT) + isolated worktree; PR with human review.
-- Never auto-merge to denylist paths (`docs/safety.md`). No loop touches `01-context` enforcement or `03-evals` calibration without a human gate.
+- Never auto-merge to denylist paths (`loops/safety.md`). No loop touches `01-context` enforcement or `03-evals` calibration without a human gate.

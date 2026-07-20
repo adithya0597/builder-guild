@@ -61,7 +61,7 @@ changes touching >10 files · third failed attempt on the same item.
 
 ## Kill Switch
 
-`loop-pause-all` label or a flag in STATE.md High Priority. Resume only after a human clears it.
+`loop-pause-all` label or a flag in loops/daily-triage/STATE.md High Priority. Resume only after a human clears it.
 
 ## Pre-Flight (before L3 / unattended)
 
@@ -70,4 +70,4 @@ changes touching >10 files · third failed attempt on the same item.
 - [ ] Connector scopes reviewed (GitHub read + comment; no graph writes)
 - [ ] Human gates documented (above)
 - [ ] Kill switch documented
-- [ ] A **real** loop run logged in `loop-run-log.md` (not a heuristic activity match)
+- [ ] A **real** loop run logged in `loops/daily-triage/run-log.md` (not a heuristic activity match)

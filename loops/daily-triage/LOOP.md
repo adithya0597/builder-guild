@@ -8,18 +8,18 @@ touch online enforcement (`01-context`) or calibration (`03-evals`) without a hu
 
 | Pattern | Cadence | Status | Command |
 |---------|---------|--------|---------|
-| Daily Triage | 1d | **L1 report-only** | `/loop 1d Run loop-triage. Update STATE.md. No code edits.` |
+| Daily Triage | 1d | **L1 report-only** | `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` |
 
 Phased rollout: L1 report → L2 assisted (verifier + worktree) → L3 unattended (only after
 budget + run log + safety + a real, committed run). **One report-only run logged
-(2026-06-29T15:57:35Z, see loop-run-log.md); loop dormant since — L1.**
+(2026-06-29T15:57:35Z, see run-log.md); loop dormant since — L1.**
 
 ## Human Gates (always required)
 
 - Any change to `01-context/` online enforcement (namespace filters, the abstain/execute gate).
 - Any change to `03-evals/` calibration logic or `CALIBRATED[role]` grants — code may revoke autonomy, never grant it.
 - Schema / write semantics (`01-context/schema/relations.yaml`, ONTOLOGY).
-- Anything on the denylist in [docs/safety.md](docs/safety.md).
+- Anything on the denylist in [loops/safety.md](../safety.md).
 
 ## Worktrees
 
@@ -33,14 +33,14 @@ budget + run log + safety + a real, committed run). **One report-only run logged
 
 ## Budget & Observability
 
-- Token caps + kill switch: [loop-budget.md](loop-budget.md)
-- Run history (append per run): [loop-run-log.md](loop-run-log.md)
+- Token caps + kill switch: [budget.md](budget.md)
+- Run history (append per run): [run-log.md](run-log.md)
 - Kill switch: `loop-pause-all` label or a flag in STATE.md High Priority.
 
 ## Safety & Gates
 
-- Default: **no auto-merge.** Denylist + auto-merge policy + MCP least-privilege in [docs/safety.md](docs/safety.md).
-- Live state spine: STATE.md at repo root.
+- Default: **no auto-merge.** Denylist + auto-merge policy + MCP least-privilege in [loops/safety.md](../safety.md).
+- Live state spine: STATE.md in this folder (`loops/daily-triage/`).
 
 ## Maturity (honest)
 

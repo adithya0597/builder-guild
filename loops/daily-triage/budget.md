@@ -13,7 +13,7 @@ If no high-priority items, exit immediately (early-exit < 5k tokens). Spawn sub-
 ## On budget exceed
 
 1. Pause schedulers (disable the Action / `/loop` / Conductor automation).
-2. Append a `budget-exceeded` event to `loop-run-log.md`.
+2. Append a `budget-exceeded` event to `run-log.md`.
 3. Notify human (STATE.md High Priority).
 
 ## Kill switch
