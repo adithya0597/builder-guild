@@ -12,6 +12,26 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
+**Session 2026-07-20 (research → operationalization wiring) — appended on top; the 07-16..19 block
+follows.** Ran, in order: (1) `/explore` `loopmature-20260720a` — FULL CLOSE PASS, 8-lane external
+sweep (websearch/github/academic/reddit/x-twitter/youtube/context7 + last30days-empty), report
+`.explore/REPORT-loopmature-20260720a.md`; verdicts = enforce in the platform layer, hybrid
+STATE (markdown + deterministic hash/version primitives, NOT wholesale state.json), maturity =
+schedule-first + run-count evidence + heartbeat. Two user X links (Anatoli Kopadze / Anthropic AI
+DevCon "dreaming" talk) mined locally (yt-dlp transcript + 20 slide frames). (2) Three parallel
+reports → git-excluded `audits/`: `SOLO_OPERATOR_AND_L2_SLIMMING.md` (SMOKING GUN, verified via
+`gh api`: `main` protection is theatrical — `required_approving_review_count=1` the solo owner can
+never self-satisfy + `enforce_admins=false` + `required_status_checks=null`; the solo gate is
+required *status checks* + 0 approvals + no-bypass ruleset), `IN_THE_LOOP_OS_REVIEW.md` +
+`AGENT_HUB_FIELD_GUIDE_REVIEW.md` (both by **Angus Sewell**, NOT Eric Siu). (3) `loops/` restructure
+(commit `2546e25`) — per-loop folders like `.claude/skills/`. (4) Manual loop test run
+2026-07-20T20:03:23Z on the relocated structure (commits `223b285`+`21b28c6`). (5) `/buildloop`
+`bl-20260720-sched` → **PR #22 OPEN/MERGEABLE, CI green (ci+pr-gate+cla)** — beads `phy` (cron
+scheduler) + `8cj` (scheduler-side kill switch) in one PR; the security review (2 codex passes + 1
+confirm + RED-TEAM) drove an **L2 route-up re-architecture to two separated jobs** (agent job
+`contents:read`+no-token → artifact; fresh-checkout commit job holds the write token) — closes the
+"untrusted agent contaminates a later privileged step" class; close-check.sh exit 0.
+
 **Session 2026-07-16..19 (bl-20260717 + adversarial review) — the branch is now: rebase onto main
 `3096310` + L1 scaffolding + an 8-commit verified fix sweep, pushed, PR #21 OPEN/MERGEABLE
 (github.com/adithya0597/builder-guild/pull/21), CI green on two consecutive attempts (smoke + graph,
@@ -38,7 +58,7 @@ in the loop-engineering repo's own templates:
 
 ## Status (honest)
 
-**L1, two manual runs logged.** Report-only runs 2026-06-29T15:57:35Z and 2026-07-20T20:03:23Z (the latter = first run on the relocated `loops/` structure); no scheduled runs yet.
+**L1, two manual runs logged; scheduler authored but not yet firing.** Report-only runs 2026-06-29T15:57:35Z and 2026-07-20T20:03:23Z (the latter = first run on the relocated `loops/` structure). The cron scheduler exists on PR #22 but fires only from the default branch — inert until merged + secret/variable set (bead `006`). No scheduled runs yet.
 `loop-audit` would score this ~100/100 and may read **L3**, because its activity heuristic counts
 the words "triage"/"last run" found in `STATE.md` prose — a known false positive. The run log holds
 only those honest entries so the heuristic isn't laundered into an L3 claim. **It is genuinely L1.**
@@ -59,15 +79,23 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 
 ## Next Steps
 
-0. **USER DECISIONS PENDING (in priority order):** (a) merge PR #21 — CI green (incl. the
-   `loops/` restructure commit), review pending; (b) remove/relocate this HANDOFF.md before merge
-   (its own header's rule); (c) **wiring beads CREATED 2026-07-20 (not started, founder-gated):**
-   epic `builder-guild-tic` + 9 children — `phy` scheduler, `8cj` kill-switch if-guard, `ye0`
-   required PR checks (+ approvals→0 + no-bypass ruleset ext.), `btj` verifier invocation (+
-   verdict-as-required-check ext.), `oy7` run evidence/digest, `d0j` citation-checker hardening,
-   `lbd` STATE.md hash preconditions, `hot` risk-tier classifier, `icg` settings-tamper alarm.
-   Evidence spec: `.explore/REPORT-loopmature-20260720a.md` + `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`.
-   Decision needed: green-light implementation order (suggest `phy` → `8cj`/`ye0` → rest).
+0. **USER DECISIONS PENDING (in priority order):**
+   (a) **Merge PR #22** (`feat/loop-scheduler` → `feat/loop-engineering-v3`) — scheduler + kill
+       switch, CI green (ci+pr-gate+cla), close-check exit 0. Then merge PR #21 → main.
+   (b) **After #22 merges, bead `builder-guild-006` (merge-gated proofs):** set repo **secret**
+       `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) + **variable** `LOOP_PAUSE_ALL=false`;
+       then prove on the default branch — a scheduled `loop-triage` run appears in `gh run list`,
+       and with `LOOP_PAUSE_ALL=true` the next run's triage job shows *skipped*. This is what turns
+       "L1 tested" into "L1 operational".
+   (c) **Bead `builder-guild-bgo` (RED-TEAM residual, your threat-model call):** API-key egress from
+       the agent job — bounded to credit-burn (rotatable; write token never meets untrusted code).
+       Decide: add `harden-runner` egress-allowlist + org spend cap, OR accept-as-residual at L1.
+   (d) **`ye0` under-specified half (from solo-operator report):** when wired, it must also drop
+       `required_approving_review_count`→0 AND enable a no-bypass ruleset — the current live config
+       is theatrical (see `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`).
+   (e) Remove/relocate this HANDOFF.md before merging the branch to `main` (its own header's rule).
+   Remaining epic `tic` children (not started): `ye0`, `btj`, `oy7`, `d0j`, `lbd`, `hot`, `icg`
+   (+ `006`, `bgo`). Suggested next build: `ye0` (required checks + settings fix) then `hot`.
 1. ~~Run the loop again~~ **DONE 2026-07-20 (manual test run on the relocated structure — STATE.md rewritten, run-log entry 2).** Scheduled runs remain the real operational bar (bead builder-guild-phy). Manual re-run recipe:
    `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` Let it rewrite the state file, then append
    one honest entry to `loops/daily-triage/run-log.md` and commit. That converts "L1 setup" into "L1 operational".
@@ -91,21 +119,38 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 ## Key Files Modified
 
 This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added (loop scaffolding; relocated 2026-07-20 into `loops/`):
-`loops/daily-triage/{LOOP.md,STATE.md,run-log.md,budget.md}`, `loops/safety.md`, `AGENTS.md`,
+`loops/daily-triage/{LOOP.md,STATE.md,run-log.md,budget.md}`, `loops/safety.md`, `loops/README.md`, `AGENTS.md`,
 `.claude/skills/loop-triage/SKILL.md`, `.claude/agents/loop-verifier.md`. Modified (bl-20260717 fix
 sweep): the scaffolding docs above plus `03-evals/src/{eval_corrective,eval_planner,eval_ocr,h3_instr,test_g3,golden_v1_draft}.py`,
 `03-evals/golden_v1_review.md`, `tools/run_guard.py`, `01-context/setup_a2.sh`, `.env.example`.
 
-## Branch graph (as of the bl-20260717 close; exact tip = `git rev-parse HEAD`)
+**On PR #22 branch `feat/loop-scheduler` (NOT yet in this branch — merge via #22):**
+`.github/workflows/loop-triage.yml` (NEW — two-job scheduler); `loops/daily-triage/{LOOP.md,budget.md}`
++ `loops/safety.md` (three-layer kill-switch docs + cap/semantics precision). Commits `7a858cc`
+(impl) + `c377d4c` (review-hardening).
 
-- `feat/loop-engineering-v3` — this work: `main` (`3096310`) + loop scaffolding (`8d71cf9`, `d2ef3b2`, `0aff6ed`) + the bl-20260717 fix commits.
+Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.md`,
+`IN_THE_LOOP_OS_REVIEW.md`, `AGENT_HUB_FIELD_GUIDE_REVIEW.md`. Explore run:
+`.explore/REPORT-loopmature-20260720a.md` + `source-ledger-loopmature.jsonl`.
+
+## Branch graph (exact tip = `git rev-parse HEAD`; verified 2026-07-20)
+
+- `feat/loop-engineering-v3` — `main` (`3096310`) + loop scaffolding + bl-20260717 fixes + `loops/`
+  restructure (`2546e25`) + loop run/docs-truth (`223b285`, `21b28c6`). Tip **`21b28c6`** =
+  `origin/feat/loop-engineering-v3` (clean tree). PR #21 → main, OPEN/MERGEABLE.
+- `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening).
+  PR #22 → `feat/loop-engineering-v3`, OPEN/MERGEABLE, CI green.
 - `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
 ## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-20)
 
-- Session 2026-07-20: opened **11** (`nfy` explore run — closed same day; epic `tic` + 9 wiring
-  children, all open/unstarted) · Current open: **23 of 143 total** (`bd stats`).
+- Session 2026-07-20: opened **13** — `nfy` (explore loopmature, CLOSED), epic `tic`, `phy`
+  (CLOSED), `8cj` (CLOSED), `ye0`, `btj`, `oy7`, `d0j`, `lbd`, `hot`, `icg`, `006`, `bgo`.
+  Closed **3** (`nfy`, `phy`, `8cj`). Live count: **23 open of 145 total** (`bd stats`:
+  Closed 122, In Progress 0). Epic `tic` open, blocked by its 9 unstarted children + `006`+`bgo`.
+- (superseded line kept for history) earlier same-session snapshot read 11 opened / 23 of 143;
+  the +2 are `006`+`bgo` created during the buildloop run.
 - Session 2026-07-16..17: opened **8** (`builder-guild-g9r` epic + `g9r.1`–`g9r.7`, the bl-20260717
   fix sweep) · Closed same session: **all 8** (close-check PASS, reason recorded per bead).
 - Current open: **13 of 132 total** — the 3 excluded bugs (`78o`, `6mg`, `dju`), the deferred
