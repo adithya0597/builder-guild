@@ -12,7 +12,19 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-L1 loop setup committed on this branch (`feat/loop-engineering-v3`, commit `8d71cf9`, 8 files, +341
+**Session 2026-07-16..19 (bl-20260717 + adversarial review) — the branch is now: rebase onto main
+`3096310` + L1 scaffolding + an 8-commit verified fix sweep, pushed, PR #21 OPEN/MERGEABLE
+(github.com/adithya0597/builder-guild/pull/21), CI green on two consecutive attempts (smoke + graph,
+attempt 2 rerun deliberately).** What ran, in order: (1) deep scan — 5 lens finders + merge + codex
+refuter, 25 findings, 25/25 CONFIRMED; (2) `/explore` run `loopconv-20260716a` — FULL CLOSE PASS,
+5 local lanes over the 14-day conversation corpus (report: `.explore/REPORT-loopconv-20260716a.md`);
+(3) `/buildloop` `bl-20260717` — 7 beads (epic `g9r`), all gates, close-check exit 0, two review-round
+fix commits after 4 independent finders converged on self-invalidating git-state snapshots in the
+docs-truth sweep itself; (4) devil's-advocate review of the Loops Creator Kit vs this stack —
+**Kit 3.7/10, ours 4.8/10, both 2/10 operational** — full teardown + adjudication in
+`audits/LOOPS_KIT_VS_BUILDER_GUILD.md` (local-only, git-excluded per founder decision 2026-07-01).
+
+L1 loop setup committed on this branch (originally commit `8d71cf9`, 8 files, +341
 lines), scoped to Builder Guild's real domain (layer boundary + invariants + calibration), grounded
 in the loop-engineering repo's own templates:
 
@@ -47,6 +59,14 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 
 ## Next Steps
 
+0. **USER DECISIONS PENDING (in priority order):** (a) merge PR #21 — CI green ×2, review pending;
+   (b) remove/relocate this HANDOFF.md before merge (its own header's rule); (c) approve creating
+   the **5 wiring beads** from the devil's-advocate adjudication — external scheduler (GitHub
+   Action cron or cloud routine) for daily-triage; kill-switch check moved into the scheduler
+   (`if: !contains(labels, 'loop-pause-all')`) so it's external to the loop; close-check +
+   publish-gate wired into CI on loop PRs (gate INTO the merge path); first real loop-verifier
+   invocation on an actual diff; committed run evidence. These five convert the DA teardown's
+   "2/10 operational, self-certification" findings into enforced properties.
 1. **Run the loop again to earn operational L1** (the single logged run, 2026-06-29T15:57:35Z, predates this branch). In a Conductor workspace on this branch:
    `/loop 1d Run loop-triage. Update STATE.md. No code edits.` Let it rewrite `STATE.md`, then append
    one honest entry to `loop-run-log.md` and commit. That converts "L1 setup" into "L1 operational".
@@ -82,8 +102,11 @@ sweep): the scaffolding docs above plus `03-evals/src/{eval_corrective,eval_plan
 - `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
-## Tracker Delta (beads)
+## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-19)
 
-- Opened this session: **0** · Closed this session: **0**.
-- The loop-engineering work was not tracked in beads. Pre-existing open issues are unrelated to this
-  branch and live in the gitignored `.beads/` tracker.
+- Opened session 2026-07-16..17: **8** (`builder-guild-g9r` epic + `g9r.1`–`g9r.7`, the bl-20260717
+  fix sweep) · Closed same session: **all 8** (close-check PASS, reason recorded per bead).
+- Current open: **13 of 132 total** — the 3 excluded bugs (`78o`, `6mg`, `dju`), the deferred
+  TrustGraph epic (`7vj` + 2 children), `pnd`, `2tn`, `11b` (FOUNDER-GATED), `9bi`, `w7y`, `6a2`,
+  `kqo`. Bead text of `2tn`/`pnd`/`7vj.1` was refreshed to current serve.py line refs (g9r.7).
+- Tracker lives in the gitignored `.beads/` (author-local; not visible to PR reviewers).
