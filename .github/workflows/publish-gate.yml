@@ -1,9 +1,11 @@
 name: publish-gate
 
 # CI twin of the local pre-push disclosure gate (tools/publish_gate.sh). A required check on
-# protected branches: it re-runs the SAME scan the git pre-push hook runs locally, so a secret or
-# private-residue string can't reach a protected branch just because someone pushed with
-# --no-verify or from a machine that never installed the hook. It NEVER re-implements the scan —
+# protected branches: it re-runs the generic (no-overlay) half of the scan the git pre-push hook
+# runs locally, so a secret or public-residue string can't reach a protected branch just because
+# someone pushed with --no-verify or from a machine that never installed the hook. NOTE: the
+# personal/org overlay ($1) lives OUTSIDE the repo by design, so CI structurally can't load it —
+# CI catches the generic patterns; the local hook additionally catches overlay residue. It NEVER re-implements the scan —
 # it invokes the script (rules/git-safety.md). No paths/branch filter and no kill-switch
 # condition on purpose: a required check must never skip, because a skipped run reports as
 # success and the gate would silently open.
