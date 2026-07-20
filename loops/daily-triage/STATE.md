@@ -1,6 +1,6 @@
 # Loop State — Builder Guild
 
-Last run: 2026-06-29T15:57:35Z · daily-triage · L1 report-only · branch `feat/loop-engineering-v3`
+Last run: 2026-07-20T20:03:23Z · daily-triage · L1 report-only (manual run; first on the relocated `loops/` structure) · branch `feat/loop-engineering-v3`
 
 Durable memory spine for Builder Guild's maintenance loops. The daily-triage loop reads and
 rewrites this file each run. Humans review it; the loop never acts on code without a human
@@ -8,54 +8,58 @@ gate (see LOOP.md, loops/safety.md).
 
 ## High Priority (loop acting or waiting on human)
 
-(none) — no red CI gate, no failing invariant sweep, no calibration regression as of this run.
+(none) — no red CI gate (branch + main both green), no failing invariant sweep, no calibration
+regression as of this run.
 
 ## Watch List
 
 <!-- Lower urgency; report-only. -->
 
-- [ ] **Loop branch unmerged + `.claude/` tracking collision** — `feat/loop-engineering-v3` carries the
-  loop scaffolding plus the bl-20260717 fix sweep (docs-truth + eval/tooling fixes under `03-evals`,
-  `tools/`, `01-context/setup_a2.sh`, `.env.example`), no open PR; HANDOFF.md flags a `.claude/`
-  symlink-vs-tracked collision to resolve before merging to `main`.
-  Observed artifact: untracked `.claude/.claude` nested symlink.
-  Suggested loop action: report-only; **human-gate** (merge decision + `.claude/` ownership). Do not auto-resolve.
-- PR #13 `docs(roadmap): reconcile gate-state numbers to CASE_STUDY` was CLOSED unmerged 2026-07-13 — no watch.
+- [ ] **PR #21 merge decision (human-gate)** — OPEN/MERGEABLE; CI green through the `loops/`
+  restructure (run `29773277829`, smoke + graph, sha `2546e25`). Pre-merge blockers named in
+  HANDOFF.md: remove/relocate HANDOFF.md; resolve the `.claude/` symlink-vs-tracked collision.
+  Suggested loop action: report-only; founder decision.
+- [ ] **Loop-operationalization epic open, unstarted (founder-gated)** — `builder-guild-tic` +
+  9 children (scheduler, kill-switch if-guard, required PR checks, verifier invocation, run
+  evidence/digest, citation-checker hardening, STATE.md hash preconditions, risk-tier
+  classifier, settings-tamper alarm). Suggested loop action: none until founder go.
+- [ ] **Issues #15 + #16 open** — #15 `cal2_erag.py` golden-set defaults (touches `cal*` =
+  denylist), #16 missing `.key` uniqueness constraints (StatusValue/Decision). Both pre-existing,
+  mapped to excluded bug beads. Suggested loop action: **human-gate**; never auto-fix.
+- [ ] **loop-audit heuristic vs relocated files** — external scorers pattern-matching root-level
+  `STATE.md`/`LOOP.md` may mis-score after the 2026-07-20 move (documented in loops/README.md).
+  Suggested loop action: none; informational.
 
 ## Graph & Invariant Health
 <!-- Source of truth = ci.yml graph job (real Neo4j). Job success ⟹ every gate's grep matched (set -e). -->
-- Source: CI run `28139965679` (success · 2026-06-25T01:06Z · sha `61f7395` = then-`origin/main` HEAD;
-  current `origin/main` is `3096310`, branch rebased onto it).
-- Namespace isolation (node + edge): green — mutate/namespace-isolation gate (ci.yml:106, `E1_MUT_OK`).
-- Bi-temporal validity (current = `invalid_at > now`): green — stamp/reconcile gates (ci.yml:137-140).
-- Single-current + cycle sweeps: green — invariant_check + cycle_check (+ self-tests) (ci.yml:109-115).
-- Deterministic-write invariant (no LLM-authored facts): green — write-gateway gate (ci.yml:56, `WRITE_GATEWAY_OK`).
-- Not re-run on loop branch: the bl-20260717 fix sweep touches `03-evals`, `tools/`, and
-  `01-context/setup_a2.sh` (diagnostic/doc-truth fixes, `py_compile`-verified locally) — full graph
-  gates run on the PR (CI fires on `pull_request`) and must be green before merge.
+- Source: CI run `29773277829` (success · 2026-07-20T19:49Z · sha `2546e25` = branch HEAD at run
+  time; PR #21 run — first green gate battery ON the relocated structure).
+- Namespace isolation (node + edge): green — mutate/namespace-isolation gate (`E1_MUT_OK`).
+- Bi-temporal validity (current = `invalid_at > now`): green — stamp/reconcile gates.
+- Single-current + cycle sweeps: green — invariant_check + cycle_check (+ self-tests).
+- Deterministic-write invariant (no LLM-authored facts): green — write-gateway gate (`WRITE_GATEWAY_OK`).
 
 ## Eval / Calibration Status (03-evals)
 <!-- Denylist path — human-gate, never loop-act. Autonomy off until a role is calibrated in code. -->
-- CALIBRATED roles: **none** — `abstain.CALIBRATED` per-namespace dict defaults every role `False` (suggest-only).
-- Guards enforce all-False: `cal4_sweep.py` (CAL4_FAIL on flip), `h2b1_calib.py` (must-not-flip). Healthy.
-- Last calibration verdict: see `03-evals/CASE_STUDY_calibration.md`. No regression this run.
+- CALIBRATED roles: **none** — `01-context/src/abstain.py:26` per-namespace dict, all roles
+  `False` (verified this run: 0 `True` entries). Suggest-only everywhere; grants are human-only,
+  code revokes only.
+- Guards present: `cal4_sweep.py`, `h2b1_calib.py` (03-evals/src). Healthy.
+- No calibration regression this run.
 
 ## CI Gates
-<!-- .github/workflows/ has ci.yml + cla.yml + pr-gate.yml; ci.yml carries the per-layer graph gates: smoke (DB-free) + graph (Neo4j). -->
-- Last main CI: **success** — run `28139965679` · 2026-06-25T01:06Z · sha `61f7395` (then-main; current origin/main `3096310`).
-- Per-layer gates in the green run: import smoke, DB-free contract demos (evidence/pageindex), write-gateway,
-  spine/mutate/deadedge, invariant + cycle sweeps (+ self-tests), sentinel guard, read-path gates
-  (scope/epist/abstain/gate/stamp/reconcile), recall + retention self-tests.
-- Loop branch `feat/loop-engineering-v3`: **no CI run yet** (CI fires on `push:main` + `pull_request`; no open PR).
-  Branch carries eval/tooling fixes (bl-20260717) — the PR's CI run is the gate; locally only
-  `py_compile` + targeted greps were run.
+<!-- ci.yml (smoke DB-free + graph Neo4j) + cla.yml + pr-gate.yml. -->
+- Branch `feat/loop-engineering-v3`: run `29773277829` **success** (smoke + graph) ·
+  2026-07-20T19:49Z · sha `2546e25`; cla run `29773274550` success.
+- `main`: run `29653108642` **success** · 2026-07-18T17:02Z · sha `3096310`.
 
 ## Recent Noise (ignored this run)
 
-- Untracked `.claude/.claude` nested symlink — artifact of the documented `.claude/` collision (tied to Watch
-  item above; not committed — that run's commit touched only the state + run-log files, then at repo root).
-- Merged PRs #4–#12 — historical, all CI-green; no action.
-- "Scheduled" entry in `gh run list` history — not part of ci.yml gates on this branch; not a finding.
+- Untracked `.claude/.claude` nested symlink — known collision artifact (see HANDOFF Watch);
+  unchanged, not committed.
+- `git add` advisory "paths ignored" on tracked `.claude/skills/loop-triage/SKILL.md` —
+  advisory only; the file committed fine (see `2546e25` stat).
+- Two mid-session API-stall notices — no state impact; all writes verified on disk after each.
 
 ---
 Run log: see `run-log.md` | (timestamp) | findings | actions | escalations

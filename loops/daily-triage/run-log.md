@@ -29,3 +29,7 @@ signal (e.g. the word "audit" in git history) is **not** a run and must not be r
 ```json
 {"run_id": "2026-06-29T15:57:35Z", "pattern": "daily-triage", "duration_s": 276, "items_found": 2, "actions_taken": 0, "escalations": 0, "tokens_estimate": 30000, "outcome": "report-only"}
 ```
+
+```json
+{"run_id": "2026-07-20T20:03:23Z", "pattern": "daily-triage", "duration_s": 600, "items_found": 4, "actions_taken": 0, "escalations": 0, "tokens_estimate": 15000, "outcome": "report-only"}
+```
