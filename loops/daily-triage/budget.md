@@ -18,5 +18,10 @@ If no high-priority items, exit immediately (early-exit < 5k tokens). Spawn sub-
 
 ## Kill switch
 
-- Label / flag: `loop-pause-all` (or a flag in STATE.md High Priority).
-- Resume only after a human clears the flag.
+Three layers:
+
+1. `LOOP_PAUSE_ALL` repo variable = scheduler-side graceful pause (job `if:` refuses to start).
+2. `gh workflow disable loop-triage` = platform hard-off.
+3. STATE.md High-Priority flag = in-band skill check (existing).
+
+Resume only after a human clears the flag / re-enables the workflow.

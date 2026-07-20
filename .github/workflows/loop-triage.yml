@@ -1,0 +1,46 @@
+name: loop-triage
+on:
+  schedule:
+    - cron: "17 9 * * *"        # daily 09:17 UTC — off-hour minute (on-the-hour crons get dropped/delayed under load)
+  workflow_dispatch: {}
+permissions:
+  contents: write                # checkout + push the state commit; nothing else
+concurrency:
+  group: loop-triage             # never two runs in flight
+  cancel-in-progress: false
+jobs:
+  triage:
+    # 8cj KILL SWITCH (scheduler-side): evaluated by GitHub BEFORE any agent code runs.
+    # Unset variable -> '' != 'true' -> runs (absence is not pause; hard-off = `gh workflow disable loop-triage`).
+    if: ${{ vars.LOOP_PAUSE_ALL != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15          # phy cap 1: wall clock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # founder-set; OAuth alt: claude_code_oauth_token
+          prompt: |
+            Run the loop-triage skill (.claude/skills/loop-triage/SKILL.md) exactly:
+            mandatory pre-run checks (STATE flag kill switch, budget caps from
+            loops/daily-triage/budget.md counted against run-log.md), then rewrite
+            loops/daily-triage/STATE.md from live signals and append one schema-consistent
+            run-log entry. REPORT-ONLY: modify ONLY loops/daily-triage/STATE.md and
+            loops/daily-triage/run-log.md. No other file, no code, no graph.
+          claude_args: "--max-turns 25"                          # phy cap 2: iteration bound
+      - name: enforce report-only surface (deterministic guard)
+        run: |
+          set -euo pipefail
+          CHANGED=$(git diff --name-only HEAD)
+          echo "changed:"; echo "$CHANGED"
+          BAD=$(echo "$CHANGED" | grep -v -E '^loops/daily-triage/(STATE\.md|run-log\.md)$' | grep -v '^$' || true)
+          if [ -n "$BAD" ]; then echo "GUARD_FAIL: loop touched files outside its surface:"; echo "$BAD"; exit 1; fi
+      - name: commit state
+        run: |
+          set -euo pipefail
+          if git diff --quiet HEAD; then echo "no state change"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loops/daily-triage/STATE.md loops/daily-triage/run-log.md
+          git commit -m "loop(daily-triage): scheduled run $(date -u +%Y-%m-%dT%H:%M:%SZ) [report-only]"
+          git push

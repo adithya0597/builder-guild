@@ -12,7 +12,9 @@ touch online enforcement (`01-context`) or calibration (`03-evals`) without a hu
 
 Phased rollout: L1 report → L2 assisted (verifier + worktree) → L3 unattended (only after
 budget + run log + safety + a real, committed run). **Two report-only runs logged
-(2026-06-29T15:57:35Z, 2026-07-20T20:03:23Z — see run-log.md); both manual, no scheduler yet — L1.**
+(2026-06-29T15:57:35Z, 2026-07-20T20:03:23Z — see run-log.md); scheduler workflow authored
+2026-07-20 (`.github/workflows/loop-triage.yml`); cron fires only from the default branch —
+inert until merged. Runs to date: manual — L1.**
 
 ## Human Gates (always required)
 
@@ -35,7 +37,9 @@ budget + run log + safety + a real, committed run). **Two report-only runs logge
 
 - Token caps + kill switch: [budget.md](budget.md)
 - Run history (append per run): [run-log.md](run-log.md)
-- Kill switch: `loop-pause-all` label or a flag in STATE.md High Priority.
+- Kill switch (three layers): `LOOP_PAUSE_ALL` repo variable = scheduler-side graceful pause
+  (job `if:` refuses to start) · `gh workflow disable loop-triage` = platform hard-off ·
+  STATE.md High-Priority flag = in-band skill check.
 
 ## Safety & Gates
 
@@ -44,6 +48,8 @@ budget + run log + safety + a real, committed run). **Two report-only runs logge
 
 ## Maturity (honest)
 
-Operational level: **L1** — report-only, two logged manual runs, no scheduler yet. The artifacts here structurally enable L2;
+Operational level: **L1** — report-only, two logged manual runs; scheduler workflow authored
+2026-07-20 (`.github/workflows/loop-triage.yml`); cron fires only from the default branch —
+inert until merged. Runs to date: manual. The artifacts here structurally enable L2;
 L3 requires *real proven activity*, not file presence (see loop-engineering anti-pattern
 "L3 before L1 quality"). A heuristic git-history match on words like "audit" is not a run.
