@@ -34,14 +34,14 @@ in the loop-engineering repo's own templates:
 - `.claude/skills/loop-triage/SKILL.md` — signal-only triage skill (rewrites `STATE.md`, never edits code).
 - `.claude/agents/loop-verifier.md` — maker/checker, default **REJECT**, runs the narrowest proof.
 - `loops/safety.md` — denylist (`01-context` enforcement, `03-evals` calibration), no-auto-merge, human gates, MCP least-privilege, kill switch.
-- `loops/daily-triage/budget.md` + `run-log.md` — cost-observability spine. **Run log holds one honest entry (2026-06-29T15:57:35Z).**
+- `loops/daily-triage/budget.md` + `run-log.md` — cost-observability spine. **Run log holds two honest entries (2026-06-29T15:57:35Z, 2026-07-20T20:03:23Z).**
 
 ## Status (honest)
 
-**L1, one run logged.** One report-only run logged 2026-06-29T15:57:35Z; no automated runs since.
+**L1, two manual runs logged.** Report-only runs 2026-06-29T15:57:35Z and 2026-07-20T20:03:23Z (the latter = first run on the relocated `loops/` structure); no scheduled runs yet.
 `loop-audit` would score this ~100/100 and may read **L3**, because its activity heuristic counts
 the words "triage"/"last run" found in `STATE.md` prose — a known false positive. The run log holds
-only that one honest entry so the heuristic isn't laundered into an L3 claim. **It is genuinely L1.**
+only those honest entries so the heuristic isn't laundered into an L3 claim. **It is genuinely L1.**
 
 ## What Worked
 
@@ -59,15 +59,16 @@ only that one honest entry so the heuristic isn't laundered into an L3 claim. **
 
 ## Next Steps
 
-0. **USER DECISIONS PENDING (in priority order):** (a) merge PR #21 — CI green ×2, review pending;
-   (b) remove/relocate this HANDOFF.md before merge (its own header's rule); (c) approve creating
-   the **5 wiring beads** from the devil's-advocate adjudication — external scheduler (GitHub
-   Action cron or cloud routine) for daily-triage; kill-switch check moved into the scheduler
-   (`if: !contains(labels, 'loop-pause-all')`) so it's external to the loop; close-check +
-   publish-gate wired into CI on loop PRs (gate INTO the merge path); first real loop-verifier
-   invocation on an actual diff; committed run evidence. These five convert the DA teardown's
-   "2/10 operational, self-certification" findings into enforced properties.
-1. **Run the loop again to earn operational L1** (the single logged run, 2026-06-29T15:57:35Z, predates this branch). In a Conductor workspace on this branch:
+0. **USER DECISIONS PENDING (in priority order):** (a) merge PR #21 — CI green (incl. the
+   `loops/` restructure commit), review pending; (b) remove/relocate this HANDOFF.md before merge
+   (its own header's rule); (c) **wiring beads CREATED 2026-07-20 (not started, founder-gated):**
+   epic `builder-guild-tic` + 9 children — `phy` scheduler, `8cj` kill-switch if-guard, `ye0`
+   required PR checks (+ approvals→0 + no-bypass ruleset ext.), `btj` verifier invocation (+
+   verdict-as-required-check ext.), `oy7` run evidence/digest, `d0j` citation-checker hardening,
+   `lbd` STATE.md hash preconditions, `hot` risk-tier classifier, `icg` settings-tamper alarm.
+   Evidence spec: `.explore/REPORT-loopmature-20260720a.md` + `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`.
+   Decision needed: green-light implementation order (suggest `phy` → `8cj`/`ye0` → rest).
+1. ~~Run the loop again~~ **DONE 2026-07-20 (manual test run on the relocated structure — STATE.md rewritten, run-log entry 2).** Scheduled runs remain the real operational bar (bead builder-guild-phy). Manual re-run recipe:
    `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` Let it rewrite the state file, then append
    one honest entry to `loops/daily-triage/run-log.md` and commit. That converts "L1 setup" into "L1 operational".
 2. **Resolve the `.claude/` merge collision — BEFORE merging to `main`.** The
@@ -101,9 +102,11 @@ sweep): the scaffolding docs above plus `03-evals/src/{eval_corrective,eval_plan
 - `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
-## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-19)
+## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-20)
 
-- Opened session 2026-07-16..17: **8** (`builder-guild-g9r` epic + `g9r.1`–`g9r.7`, the bl-20260717
+- Session 2026-07-20: opened **11** (`nfy` explore run — closed same day; epic `tic` + 9 wiring
+  children, all open/unstarted) · Current open: **23 of 143 total** (`bd stats`).
+- Session 2026-07-16..17: opened **8** (`builder-guild-g9r` epic + `g9r.1`–`g9r.7`, the bl-20260717
   fix sweep) · Closed same session: **all 8** (close-check PASS, reason recorded per bead).
 - Current open: **13 of 132 total** — the 3 excluded bugs (`78o`, `6mg`, `dju`), the deferred
   TrustGraph epic (`7vj` + 2 children), `pnd`, `2tn`, `11b` (FOUNDER-GATED), `9bi`, `w7y`, `6a2`,

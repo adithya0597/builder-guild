@@ -11,8 +11,8 @@ touch online enforcement (`01-context`) or calibration (`03-evals`) without a hu
 | Daily Triage | 1d | **L1 report-only** | `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` |
 
 Phased rollout: L1 report → L2 assisted (verifier + worktree) → L3 unattended (only after
-budget + run log + safety + a real, committed run). **One report-only run logged
-(2026-06-29T15:57:35Z, see run-log.md); loop dormant since — L1.**
+budget + run log + safety + a real, committed run). **Two report-only runs logged
+(2026-06-29T15:57:35Z, 2026-07-20T20:03:23Z — see run-log.md); both manual, no scheduler yet — L1.**
 
 ## Human Gates (always required)
 
@@ -44,6 +44,6 @@ budget + run log + safety + a real, committed run). **One report-only run logged
 
 ## Maturity (honest)
 
-Operational level: **L1** — report-only, one logged run, dormant since. The artifacts here structurally enable L2;
+Operational level: **L1** — report-only, two logged manual runs, no scheduler yet. The artifacts here structurally enable L2;
 L3 requires *real proven activity*, not file presence (see loop-engineering anti-pattern
 "L3 before L1 quality"). A heuristic git-history match on words like "audit" is not a run.
