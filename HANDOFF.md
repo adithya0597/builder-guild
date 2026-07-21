@@ -12,11 +12,12 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-20/21 (loop-operationalization buildloop — 6 beads worked, 5 shipped + 1 can't-fix) —
-newest; the research + 07-16..19 blocks follow.** Ran `/buildloop` on six loop beads in sequence; the
-independent codex/verifier review caught a REAL bug in every shipped one (and killed a false-passing
-one before it merged). Verified end-state: `git rev-parse HEAD` = `origin/feat/loop-engineering-v3` =
-**`b5c21e0`**, clean tree.
+**Session 2026-07-20/21 (loop-operationalization buildloop — 6 beads, all delivered) — newest; the
+research + 07-16..19 blocks follow.** Ran `/buildloop` on six loop beads in sequence; the independent
+codex/verifier review caught a REAL bug in EACH (and killed a false-passing one before it merged). Five
+shipped to v3 (ye0+hot, oy7, btj, lbd, icg); the sixth (d0j) is a fix to the SHARED explore checker in
+`~/Projects/.claude` (not this branch — see its bullet). Verified end-state: `git rev-parse HEAD` =
+`origin/feat/loop-engineering-v3` = **`b836230`**, clean tree; shared checker `~/Projects/.claude` @ `93e0fd5`.
 - **ye0 + hot (merge gates)** → `.github/workflows/classify.yml` (deterministic t0/t1/t2 risk-tier
   required check, 14/14 tier cases) + `publish-gate.yml` (CI twin of the disclosure gate) +
   `.github/rulesets/loop-merge-gates.json` (payload). **Codex P1-B (real, silent):** `tools/publish_gate.sh`
@@ -46,13 +47,22 @@ one before it merged). Verified end-state: `git rev-parse HEAD` = `origin/feat/l
   retarget-off-main all read as "match" — fixed by comparing EFFECTIVE rules for main (`fe67a7c`). Then
   a **background security review** found a 4th (parser-validator differential: last-wins `_index_by_name`
   + unread `ref_name.exclude`) — fixed post-merge on v3 (`b5c21e0`).
-- **d0j (check_citations bot-wall) → CAN'T-FIX, reverted.** Target was the SHARED cross-project explore
-  checker (`~/Projects/.claude/skills/explore/check_citations.py`, symlinked in — user approved touching
-  it). Premise obsolete: the checker ALREADY yields **zero false-dead** (6 reddit sources correctly
-  UNKNOWN, not dead). Auto-*resolving* reddit is impossible unauthenticated — reddit login-walls every
-  route (www 26-word shell · `.json` 403 · old.reddit 302→login-wall that 200s with 2103 generic words
-  for real AND fake threads). An honest-route attempt **false-passed the login wall** (codex P1 + own
-  confirm — my "successful" run was 6 false-passes) → REVERTED before shipping. No code change.
+- **d0j (check_citations bot-wall) → FIXED via reddit oembed (codex PASS after 5 review rounds).** Target
+  was the SHARED cross-project explore checker (`~/Projects/.claude/skills/explore/check_citations.py`,
+  symlinked in — user approved touching it; lives in the `~/Projects/.claude` git repo, NOT on this
+  branch). Arc: a first old.reddit-HTML "honest-route" **false-passed reddit's login wall** (old.reddit
+  302s real+fake+deleted alike to a 2103-word "Welcome to Reddit" 200) — my "successful" run was 6
+  false-passes; **reverted** before it shipped. Real fix = route reddit `/r/*/comments/<id>` to the
+  public **oembed** endpoint (positive, entity-tied signal like `resolve_youtube`): fabricated/never-existed
+  → 404 → UNRESOLVABLE (the primary hallucination threat); user-self-deleted `[deleted by user]` →
+  UNRESOLVABLE (tombstone); live → RESOLVABLE; 403/429/net/badjson/non-object → UNKNOWN. **Documented
+  accepted limitation:** mod/admin-removed posts keep their real title in oembed → RESOLVABLE (oembed can't
+  distinguish; `.json` is 403-walled) — defensible for a hallucination gate. codex live-probed 129
+  self-deleted + 101 mod-removed to establish this. Shared `~/Projects/.claude` @ **`93e0fd5`**
+  (`6ea9fb9` oembed → `945c56a` tombstone → `cc7626d` stop-overclaiming → `93e0fd5` line-100 + crash guard).
+  Meta-lesson (captured): my offline self-tests kept encoding fictional oembed shapes (dead→thin, then
+  deleted→404, then removed→`[removed]`) and stayed green while false-passing live — a mock is only as good
+  as a LIVE measurement of the real response shapes.
 
 **Session 2026-07-20 (research → operationalization wiring) — the 07-16..19 block
 follows.** Ran, in order: (1) `/explore` `loopmature-20260720a` — FULL CLOSE PASS, 8-lane external
@@ -137,12 +147,13 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
        then drop `required_approving_review_count`→0 AND confirm no-bypass — turns the theatrical live
        config real (see `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`; the committed JSON is inert until POSTed).
    (e) Remove/relocate this HANDOFF.md before merging the branch to `main` (its own header's rule).
-   **Epic `tic` children — DONE this session:** `phy`,`8cj` (scheduler, PR#22), `ye0`,`hot` (merge gates),
-   `oy7` (heartbeat), `btj` (verifier-on-real-diff). **Remaining L1 build sections (not started):** `lbd`
-   (STATE.md content-hash + attributed writes), `icg` (settings-tamper alarm — trimmed, .github→t2 half now
-   done by hot), `d0j` (check_citations bot-wall). **Founder/hardening beads:** `8pf`,`006`,`bgo`,`2h9`,`ave`.
-   Suggested next build: `lbd` → then `icg`/`d0j`. NOTE: `lbd`/`icg`/`d0j` prove themselves best once the
-   loop is scheduled-LIVE (bead `006` / founder secret) — consider setting that first.
+   **Epic `tic` children — ALL 7 BUILD BEADS DONE:** `phy`,`8cj` (scheduler, PR#22), `ye0`,`hot` (merge
+   gates), `oy7` (heartbeat), `btj` (verifier-on-real-diff), `lbd` (state-guard), `icg` (settings-sentinel),
+   `d0j` (check_citations reddit-oembed, codex PASS). **The only 2 open are FOUNDER-GATED:** `006` (set the
+   secret → loop goes live) + `bgo` (egress call). **P3 follow-ups (optional, not blocking):** `8pf` (apply
+   ruleset live — also founder), `2h9` (org-ruleset proper fix for the self-editing ceiling), `ave` (ship
+   the SYNC-REGION drift tests to CI). Nothing else is buildable without founder action — the highest-leverage
+   next step is `006` (setting the secret unlocks live proof for the whole loop stack).
 1. ~~Run the loop again~~ **DONE 2026-07-20 (manual test run on the relocated structure — STATE.md rewritten, run-log entry 2).** Scheduled runs remain the real operational bar (bead builder-guild-phy). Manual re-run recipe:
    `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` Let it rewrite the state file, then append
    one honest entry to `loops/daily-triage/run-log.md` and commit. That converts "L1 setup" into "L1 operational".
@@ -194,9 +205,11 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
   restructure (`2546e25`) + loop run/docs-truth (`223b285`, `21b28c6`, `2b1cbd2`) + **merge-gates**
   (`f815e14`) + **heartbeat** (`3a33176`) + **btj verifier/STATE-fix** (`d500757`, `702a11e`) +
   **state-guard** (`e94dbff`) + **settings-sentinel** (`fe67a7c`) + **sentinel differential fix**
-  (`b5c21e0`). Tip **`b5c21e0`** = `origin/feat/loop-engineering-v3` (clean tree). PR #21 → main,
-  OPEN/**BLOCKED** — the theatrical 1-approval a solo owner can't self-satisfy; beads `8pf`/`006` are the fix.
-  (d0j touched only the SHARED `~/Projects/.claude/skills/explore/check_citations.py` and was reverted — not on this branch.)
+  (`b5c21e0`) + **handoff** (`b836230`). Tip **`b836230`** = `origin/feat/loop-engineering-v3` (clean
+  tree; this handoff edit advances it by one commit). PR #21 → main, OPEN/**BLOCKED** — the theatrical
+  1-approval a solo owner can't self-satisfy; beads `8pf`/`006` are the fix.
+  (d0j is a fix to the SHARED `~/Projects/.claude/skills/explore/check_citations.py` @ `93e0fd5` — that
+  repo, not this branch; codex PASS.)
 - `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening).
   PR #22 → `feat/loop-engineering-v3`, OPEN/MERGEABLE, CI green.
 - `main` → `3096310`.
@@ -206,9 +219,13 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
 
 - Session 2026-07-20/21 (buildloop sections): closed **7** — `ye0`, `hot` (merge gates), `oy7`
   (heartbeat), `btj` (verifier-on-real-diff), `lbd` (state-guard), `icg` (settings-sentinel) all via
-  close-check PASS + reason; `d0j` closed can't-fix (reddit unresolvable unauthenticated, honest-route
-  reverted). Opened **3** — `8pf` (founder: apply ruleset), `2h9` (org-ruleset proper fix), `ave` (ship
-  SYNC-REGION drift tests to CI). Live count: **19 open of 148 total** (`bd stats`: Closed 129).
+  close-check PASS + reason; `d0j` closed **FIXED** (reddit resolved via oembed in the shared explore
+  checker, codex PASS after 5 rounds — was briefly closed can't-fix mid-arc, then genuinely fixed).
+  Opened **3** — `8pf` (founder: apply ruleset), `2h9` (org-ruleset proper fix), `ave` (ship SYNC-REGION
+  drift tests to CI). Live count: **19 open of 148 total** (`bd stats`: Closed 129).
+- **Of the 9 epic-`tic` loop beads: 7 DONE** (`ye0`,`hot`,`oy7`,`btj`,`lbd`,`icg`,`d0j`); 2 open, both
+  FOUNDER-GATED — `006` (set `ANTHROPIC_API_KEY` secret + `LOOP_PAUSE_ALL` → loop goes live) and `bgo`
+  (egress-hardening decision). Nothing else is buildable without founder action.
 - Session 2026-07-20 (earlier): opened **13** — `nfy` (explore loopmature, CLOSED), epic `tic`, `phy`
   (CLOSED), `8cj` (CLOSED), `ye0`, `btj`, `oy7`, `d0j`, `lbd`, `hot`, `icg`, `006`, `bgo`.
   Closed **3** (`nfy`, `phy`, `8cj`). Live count: **23 open of 145 total** (`bd stats`:
