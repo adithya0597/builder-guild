@@ -164,9 +164,13 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
    `git merge-tree faf9bfb^ origin/main faf9bfb` = "changed in both" — a real conflict with a
    data-loss trap (careless resolve drops `LANGFUSE_HOST`/`BG_EMBED_MODEL`; resolve = keep main's
    lines). Codex scores: rebase-now 2/10; merge-main-into-v3 6/10 (verified clean no-op);
-   do-nothing 8/10; close-parking-PRs+fresh-branches 9/10. Decision = founder's; any future
-   go-live rebase inherits the same `faf9bfb` trap — resolution recipe above. Full verdict:
-   `scratchpad/codex-rebase-verdict.md` (session-local).
+   do-nothing 8/10; close-parking-PRs+fresh-branches 9/10. **Founder chose C (do nothing,
+   2026-07-21): no rebase, PR #21/#22 stay open as parking.** Any future go-live rebase inherits
+   the same `faf9bfb` trap — resolution recipe above. Full verdict:
+   `scratchpad/codex-rebase-verdict.md` (session-local). Merge queue as of this decision: EMPTY —
+   nothing should merge now (#23 done; #21/#22 parked; `docs/reconcile-roadmap-calibration` is a
+   separate future decision carrying the known `.claude` symlink-vs-tracked collision;
+   `fix/44d-embedding-demos` verified fully-landed/stale; `cla-signatures` never merges by design).
 
 1. **(DEFERRED — only if/when the cloud loop earns runtime need) FOUNDER GO-LIVE chain** (explored
    2026-07-21; runbook `audits/006_GO_LIVE_RUNBOOK.md`, local-only; auth now = `CLAUDE_CODE_OAUTH_TOKEN`
