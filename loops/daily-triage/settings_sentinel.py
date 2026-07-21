@@ -37,8 +37,12 @@ def _load_json(path):
         return json.load(f)
 
 
-def _index_by_name(doc):
-    return {r.get("name"): r for r in doc.get("rulesets", []) if isinstance(r, dict)}
+def _rulesets_named(doc, name):
+    """ALL rulesets with this name — NOT last-wins. GitHub applies every ruleset, so a check that
+    inspects only one (e.g. a dict keyed by name) has a parser/validator differential: an attacker
+    can disable the real loop-merge-gates and add a passing duplicate (or vice-versa) and the check
+    sees only one. We validate every same-named ruleset instead."""
+    return [r for r in doc.get("rulesets", []) if isinstance(r, dict) and r.get("name") == name]
 
 
 def _check(expected, actual):
@@ -49,47 +53,54 @@ def _check(expected, actual):
     Comparison DIRECTION per key lives here (code); the VALUES live in settings-expected.json (data).
     """
     drifts = []
-    act = _index_by_name(actual)
     for exp_rs in expected.get("rulesets", []):
         name = exp_rs.get("name")
-        a = act.get(name)
-        if a is None:
+        matches = _rulesets_named(actual, name)
+        if not matches:
             drifts.append(f"DRIFT: ruleset {name} missing (expected present + active)")
             continue
-        exp_enf = exp_rs.get("enforcement", "active")
-        if a.get("enforcement") != exp_enf:
-            drifts.append(
-                f"DRIFT: ruleset {name} enforcement expected {exp_enf} got {a.get('enforcement')}")
-        # Targeting: an active ruleset retargeted off main applies to NOTHING while looking intact.
-        # The effective gate on main is gone. Assert target=branch AND main still in ref_name include.
-        if a.get("target", "branch") != "branch":
-            drifts.append(f"DRIFT: ruleset {name} target expected branch got {a.get('target')}")
-        have_refs = set(a.get("ref_name_include", []))
-        for ref in exp_rs.get("target_includes", []):
-            if ref not in have_refs:
+        # Validate EVERY same-named ruleset (not last-wins): a disabled/weakened duplicate is drift
+        # even if a passing one also exists, and vice-versa (parser/validator differential fix).
+        for a in matches:
+            tag = name if len(matches) == 1 else f"{name}#{matches.index(a)}"
+            exp_enf = exp_rs.get("enforcement", "active")
+            if a.get("enforcement") != exp_enf:
                 drifts.append(
-                    f"DRIFT: ruleset {name} no longer targets '{ref}' (retargeted off main — gate disabled)")
-        # Rule-TYPE presence: deleting a whole rule (pull_request / deletion / non_fast_forward) can
-        # normalize to a coincidentally-meets-expected value (e.g. no pull_request rule -> approvals
-        # defaults to 0 == intent), silently dropping the protection. Assert each required type EXISTS.
-        have_types = set(a.get("rule_types", []))
-        for rt in exp_rs.get("required_rule_types", []):
-            if rt not in have_types:
-                drifts.append(f"DRIFT: ruleset {name} missing required rule type '{rt}' (protection deleted)")
-        bypass = a.get("bypass_actors", [])
-        if bypass:
-            drifts.append(
-                f"DRIFT: ruleset {name} bypass_actors expected empty got {len(bypass)} actor(s)")
-        want = set(exp_rs.get("required_status_checks", []))
-        have = set(a.get("required_status_checks", []))
-        for c in sorted(want - have):
-            drifts.append(f"DRIFT: ruleset {name} required_status_checks missing '{c}'")
-        exp_appr = exp_rs.get("required_approving_review_count", 0)
-        act_appr = a.get("required_approving_review_count", 0)
-        if act_appr > exp_appr:  # approvals RE-RAISED — the loop merges autonomously, 0 is intent
-            drifts.append(
-                f"DRIFT: ruleset {name} required_approving_review_count expected <={exp_appr} "
-                f"got {act_appr}")
+                    f"DRIFT: ruleset {tag} enforcement expected {exp_enf} got {a.get('enforcement')}")
+            # Targeting: an active ruleset retargeted off main applies to NOTHING while looking intact.
+            if a.get("target", "branch") != "branch":
+                drifts.append(f"DRIFT: ruleset {tag} target expected branch got {a.get('target')}")
+            have_refs = set(a.get("ref_name_include", []))
+            for ref in exp_rs.get("target_includes", []):
+                if ref not in have_refs:
+                    drifts.append(
+                        f"DRIFT: ruleset {tag} no longer targets '{ref}' (retargeted off main — gate disabled)")
+            # Exclude: include=[main] + exclude=[main-matching] => targets main then removes it. The
+            # parser read only include; a non-empty exclude on the loop-merge-gates ruleset is drift.
+            excl = a.get("ref_name_exclude", [])
+            if excl:
+                drifts.append(
+                    f"DRIFT: ruleset {tag} ref_name.exclude non-empty ({excl}) — may carve main out of scope")
+            # Rule-TYPE presence: deleting a whole rule (pull_request / deletion / non_fast_forward) can
+            # normalize to a coincidentally-meets-expected value, silently dropping the protection.
+            have_types = set(a.get("rule_types", []))
+            for rt in exp_rs.get("required_rule_types", []):
+                if rt not in have_types:
+                    drifts.append(f"DRIFT: ruleset {tag} missing required rule type '{rt}' (protection deleted)")
+            bypass = a.get("bypass_actors", [])
+            if bypass:
+                drifts.append(
+                    f"DRIFT: ruleset {tag} bypass_actors expected empty got {len(bypass)} actor(s)")
+            want = set(exp_rs.get("required_status_checks", []))
+            have = set(a.get("required_status_checks", []))
+            for c in sorted(want - have):
+                drifts.append(f"DRIFT: ruleset {tag} required_status_checks missing '{c}'")
+            exp_appr = exp_rs.get("required_approving_review_count", 0)
+            act_appr = a.get("required_approving_review_count", 0)
+            if act_appr > exp_appr:  # approvals RE-RAISED — the loop merges autonomously, 0 is intent
+                drifts.append(
+                    f"DRIFT: ruleset {tag} required_approving_review_count expected <={exp_appr} "
+                    f"got {act_appr}")
     # main branch-protection re-imposing classic approvals (the theatrical trap)
     exp_bp = expected.get("branch_protection", {}).get("max_required_approvals", 0)
     act_bp = actual.get("branch_protection", {}).get("max_required_approvals", 0)
@@ -156,6 +167,7 @@ def _normalize_ruleset(detail):
         "rule_types": rule_types,               # every rule type present (for delete-a-rule detection)
         "target": detail.get("target"),         # "branch" — a retarget to something else disables it
         "ref_name_include": ref.get("include", []),  # must still include refs/heads/main
+        "ref_name_exclude": ref.get("exclude", []),  # a main-matching exclude carves the gate off main
     }
 
 
@@ -224,7 +236,7 @@ def _selftest(args=None):
             "required_status_checks": ["smoke", "graph", "publish-gate", "pr-classified"],
             "required_approving_review_count": 0,
             "rule_types": ["pull_request", "required_status_checks", "deletion", "non_fast_forward"],
-            "target": "branch", "ref_name_include": ["refs/heads/main"],
+            "target": "branch", "ref_name_include": ["refs/heads/main"], "ref_name_exclude": [],
         }],
         "branch_protection": {"max_required_approvals": 0},
     }
@@ -266,6 +278,14 @@ def _selftest(args=None):
         drift(lambda rs, m: rs.update(rule_types=["pull_request", "required_status_checks"]), "(j) deletion+non_fast_forward rules deleted")
         drift(lambda rs, m: rs.update(ref_name_include=["refs/heads/nonexistent"]), "(k) ruleset retargeted off main")
         drift(lambda rs, m: rs.update(target="tag"), "(k2) ruleset target changed off branch")
+        # (l) duplicate-name shadow: disable the real ruleset + add a passing same-named duplicate.
+        #     last-wins would MATCH; validating ALL same-named catches the disabled one.
+        def _dup_shadow(rs, m):
+            disabled = copy.deepcopy(rs); disabled["enforcement"] = "disabled"
+            m["rulesets"] = [disabled, copy.deepcopy(rs)]  # [disabled-real, active-dup]
+        drift(_dup_shadow, "(l) disabled real + passing duplicate (last-wins shadow)")
+        # (m) ref_name.exclude carves main out of scope while include still lists main
+        drift(lambda rs, m: rs.update(ref_name_exclude=["refs/heads/main"]), "(m) ref_name.exclude removes main")
 
         # (g) robustness: malformed actual JSON -> clean exit 2, NOT a traceback
         bad = os.path.join(d, "bad.json")
