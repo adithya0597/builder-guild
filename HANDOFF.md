@@ -170,7 +170,7 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
    `scratchpad/codex-rebase-verdict.md` (session-local). Merge queue as of this decision: EMPTY —
    nothing should merge now (#23 done; #21/#22 parked; `docs/reconcile-roadmap-calibration` is a
    separate future decision carrying the known `.claude` symlink-vs-tracked collision;
-   `fix/44d-embedding-demos` verified fully-landed/stale; `cla-signatures` never merges by design).
+   `cla-signatures` never merges by design). **Pruned 2026-07-21 (founder-ordered, containment-proven, remote+local):** `fix/l2-fixes` (`fea79f8`, tree==main), `fix/44d-embedding-demos` (`d3d75e6`, 0-line content vs merge-base), `feat/loop-engineering` (`4081b7a`) + `-v1` (`70ec1ad`) (both superseded by v3 relocation) — SHAs = re-push recovery anchors.
 
 1. **(DEFERRED — only if/when the cloud loop earns runtime need) FOUNDER GO-LIVE chain** (explored
    2026-07-21; runbook `audits/006_GO_LIVE_RUNBOOK.md`, local-only; auth now = `CLAUDE_CODE_OAUTH_TOKEN`
