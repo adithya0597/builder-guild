@@ -61,7 +61,9 @@ changes touching >10 files · third failed attempt on the same item.
 
 ## Kill Switch
 
-`loop-pause-all` label or a flag in loops/daily-triage/STATE.md High Priority. Resume only after a human clears it.
+Three layers: `LOOP_PAUSE_ALL` repo variable = scheduler-side graceful pause (job `if:` refuses
+to start) · `gh workflow disable loop-triage` = platform hard-off · a flag in
+loops/daily-triage/STATE.md High Priority = in-band skill check. Resume only after a human clears it.
 
 ## Pre-Flight (before L3 / unattended)
 
