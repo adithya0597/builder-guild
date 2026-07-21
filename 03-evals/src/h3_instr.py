@@ -53,11 +53,11 @@ class LangfuseSink:
     """Production seam: emits a trace + scores via the real Langfuse SDK."""
     def __init__(self):
         from langfuse import Langfuse
-        # dummy creds + local host; no server running -> events are accepted by the SDK then dropped at flush
+        # creds + host from env (LANGFUSE_HOST); localhost default means no-server runs drop events at flush
         self.client = Langfuse(
             public_key=os.environ.get("LANGFUSE_PUBLIC_KEY", "demo-placeholder"),
             secret_key=os.environ.get("LANGFUSE_SECRET_KEY", "demo-placeholder"),
-            host="http://localhost:3000"
+            host=os.environ.get("LANGFUSE_HOST", "http://localhost:3000")
             )
                                   
     def emit(self, name, inputs, output, scores):

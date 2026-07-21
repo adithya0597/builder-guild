@@ -65,3 +65,6 @@ audits/
 .explore/
 # session handoff state (machine-local paths + operational state; never publish)
 HANDOFF.md
+
+# Local lessons log — internal working notes, keep out of the public tree
+.claude/lessons.md

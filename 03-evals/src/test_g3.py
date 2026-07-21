@@ -15,7 +15,7 @@ injection. The whole suite runs with neo4j DOWN and with the neo4j package absen
                         the decision channel only (judge stub is PURE — never hits the CLI).
 (d) Per-namespace lease: item 5 — auto_revert("finance", 0.4, -3.0) revokes exactly finance,
                         leaves others untouched; mode reads suggest vs autonomous accordingly.
-(e) Golden_v1 draft:    item 4 — >=30 items, balanced pass/abstain, 6 roles, all unvalidated.
+(e) Golden_v1 draft:    item 4 — >=30 items, balanced pass/abstain, 3 roles, all unvalidated.
 (f) Founder-only paths:  cal3_fit and cal4_sweep accept explicit golden/result paths instead of
                         hardwiring example_golden.jsonl.
 (g) Fail-closed wiring:  cal4_sweep's new sweep_autorevert/apply_autorevert revoke on unmeasurable
@@ -240,7 +240,7 @@ def td_per_namespace_lease():
 
 # ---------------------------------------------------------------------------
 # (e) Golden_v1 draft — item 4
-# >=30 items, balanced pass/abstain, 6 roles, all unvalidated
+# >=30 items, balanced pass/abstain, 3 roles, all unvalidated
 # ---------------------------------------------------------------------------
 def te_golden_v1_draft():
     # Import the draft generator and validate its output without re-running file I/O
