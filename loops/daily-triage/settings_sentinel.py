@@ -60,6 +60,22 @@ def _check(expected, actual):
         if a.get("enforcement") != exp_enf:
             drifts.append(
                 f"DRIFT: ruleset {name} enforcement expected {exp_enf} got {a.get('enforcement')}")
+        # Targeting: an active ruleset retargeted off main applies to NOTHING while looking intact.
+        # The effective gate on main is gone. Assert target=branch AND main still in ref_name include.
+        if a.get("target", "branch") != "branch":
+            drifts.append(f"DRIFT: ruleset {name} target expected branch got {a.get('target')}")
+        have_refs = set(a.get("ref_name_include", []))
+        for ref in exp_rs.get("target_includes", []):
+            if ref not in have_refs:
+                drifts.append(
+                    f"DRIFT: ruleset {name} no longer targets '{ref}' (retargeted off main — gate disabled)")
+        # Rule-TYPE presence: deleting a whole rule (pull_request / deletion / non_fast_forward) can
+        # normalize to a coincidentally-meets-expected value (e.g. no pull_request rule -> approvals
+        # defaults to 0 == intent), silently dropping the protection. Assert each required type EXISTS.
+        have_types = set(a.get("rule_types", []))
+        for rt in exp_rs.get("required_rule_types", []):
+            if rt not in have_types:
+                drifts.append(f"DRIFT: ruleset {name} missing required rule type '{rt}' (protection deleted)")
         bypass = a.get("bypass_actors", [])
         if bypass:
             drifts.append(
@@ -118,21 +134,28 @@ def _gh_json(api_path):
 
 
 def _normalize_ruleset(detail):
-    """gh ruleset-detail JSON -> normalized watched-keys dict (same shape as expected.json)."""
+    """gh ruleset-detail JSON -> normalized watched-keys dict the pure `_check` reads."""
     approvals = 0
     checks = []
+    rule_types = []
     for rule in detail.get("rules", []):
+        rtype = rule.get("type")
+        rule_types.append(rtype)
         params = rule.get("parameters", {}) or {}
-        if rule.get("type") == "pull_request":
+        if rtype == "pull_request":
             approvals = params.get("required_approving_review_count", 0)
-        elif rule.get("type") == "required_status_checks":
+        elif rtype == "required_status_checks":
             checks = [c.get("context") for c in params.get("required_status_checks", [])]
+    ref = (detail.get("conditions", {}) or {}).get("ref_name", {}) or {}
     return {
         "name": detail.get("name"),
         "enforcement": detail.get("enforcement"),
         "bypass_actors": detail.get("bypass_actors", []),
         "required_status_checks": checks,
         "required_approving_review_count": approvals,
+        "rule_types": rule_types,               # every rule type present (for delete-a-rule detection)
+        "target": detail.get("target"),         # "branch" — a retarget to something else disables it
+        "ref_name_include": ref.get("include", []),  # must still include refs/heads/main
     }
 
 
@@ -146,8 +169,8 @@ def _branch_protection_approvals(base):
         ["gh", "api", f"{base}/branches/main/protection"],
         capture_output=True, text=True, timeout=_GH_TIMEOUT)
     if proc.returncode != 0:
-        if "404" in proc.stderr:
-            return 0
+        if "HTTP 404" in proc.stderr:  # exact "no classic protection"; a stray "404" substring in some
+            return 0                   # other error must NOT mask a re-imposed approval (fail safe -> raise)
         raise RuntimeError(proc.stderr.strip() or "branch protection fetch failed")
     data = json.loads(proc.stdout)
     return data.get("required_pull_request_reviews", {}).get("required_approving_review_count", 0)
@@ -156,8 +179,10 @@ def _branch_protection_approvals(base):
 def _fetch_and_normalize(repo):
     # gh substitutes {owner}/{repo} from the current repo when --repo is not given.
     base = f"repos/{repo}" if repo else "repos/{owner}/{repo}"
+    # per_page=100 so loop-merge-gates can't sit beyond a default 30-item page and read as "missing"
+    # (a false DRIFT). One page of 100 covers any real repo; avoids --paginate's array-merge quirk.
     rulesets = [_normalize_ruleset(_gh_json(f"{base}/rulesets/{rs['id']}"))
-                for rs in _gh_json(f"{base}/rulesets")]
+                for rs in _gh_json(f"{base}/rulesets?per_page=100")]
     return {
         "rulesets": rulesets,
         "branch_protection": {"max_required_approvals": _branch_protection_approvals(base)},
@@ -181,14 +206,25 @@ def _selftest(args=None):
     import os
     import tempfile
 
-    # The committed minimum-secure posture (mirrors settings-expected.json / loop-merge-gates.json).
-    secure = {
+    # Committed intent (expected-shape, mirrors settings-expected.json): the MINIMUM secure posture.
+    expected_intent = {
         "rulesets": [{
-            "name": RULESET,
-            "enforcement": "active",
-            "bypass_actors": [],
+            "name": RULESET, "enforcement": "active", "bypass_actors": [],
             "required_status_checks": ["smoke", "graph", "publish-gate", "pr-classified"],
             "required_approving_review_count": 0,
+            "required_rule_types": ["pull_request", "required_status_checks", "deletion", "non_fast_forward"],
+            "target_includes": ["refs/heads/main"],
+        }],
+        "branch_protection": {"max_required_approvals": 0},
+    }
+    # A live snapshot (actual-shape, as fetch-live normalizes) that MEETS the intent.
+    actual_secure = {
+        "rulesets": [{
+            "name": RULESET, "enforcement": "active", "bypass_actors": [],
+            "required_status_checks": ["smoke", "graph", "publish-gate", "pr-classified"],
+            "required_approving_review_count": 0,
+            "rule_types": ["pull_request", "required_status_checks", "deletion", "non_fast_forward"],
+            "target": "branch", "ref_name_include": ["refs/heads/main"],
         }],
         "branch_protection": {"max_required_approvals": 0},
     }
@@ -196,7 +232,7 @@ def _selftest(args=None):
     with tempfile.TemporaryDirectory() as d:
         exp_path = os.path.join(d, "expected.json")
         with open(exp_path, "w") as f:
-            json.dump(secure, f)
+            json.dump(expected_intent, f)
 
         def check_actual(actual):
             """Write `actual` to a tempfile and run the REAL cmd_check — rc IS the exit contract."""
@@ -205,48 +241,31 @@ def _selftest(args=None):
                 json.dump(actual, f)
             return cmd_check(argparse.Namespace(expected=exp_path, actual=ap))
 
-        # (a) actual == expected secure posture -> no drift, exit 0
-        rc = check_actual(secure)
-        assert rc == 0, f"(a) identical secure posture should pass, got exit {rc}"
-        print("  (a) actual == expected secure posture: exit 0  OK")
+        def drift(edit, label):
+            """Deep-copy the secure snapshot, apply `edit`, assert the REAL check flags DRIFT (exit 1)."""
+            m = copy.deepcopy(actual_secure)
+            edit(m["rulesets"][0], m)
+            rc = check_actual(m)
+            assert rc == 1, f"{label} should DRIFT, got exit {rc}"
+            print(f"  {label}: DRIFT exit 1  OK")
 
-        # (b) ruleset enforcement flipped active -> disabled  (the deliberate-change DETECTION)
-        m = copy.deepcopy(secure); m["rulesets"][0]["enforcement"] = "disabled"
-        rc = check_actual(m)
-        assert rc == 1, f"(b) disabled enforcement should DRIFT, got exit {rc}"
-        print("  (b) enforcement active->disabled: DRIFT exit 1  OK")
+        # (a) actual MEETS the intent -> no drift
+        rc = check_actual(actual_secure)
+        assert rc == 0, f"(a) secure posture should pass, got exit {rc}"
+        print("  (a) actual meets intent: exit 0  OK")
 
-        # (c) bypass_actors non-empty
-        m = copy.deepcopy(secure)
-        m["rulesets"][0]["bypass_actors"] = [{"actor_id": 1, "actor_type": "Team"}]
-        rc = check_actual(m)
-        assert rc == 1, f"(c) non-empty bypass should DRIFT, got exit {rc}"
-        print("  (c) bypass_actors non-empty: DRIFT exit 1  OK")
-
-        # (d) a required status check dropped
-        m = copy.deepcopy(secure)
-        m["rulesets"][0]["required_status_checks"] = ["smoke", "graph", "publish-gate"]  # -pr-classified
-        rc = check_actual(m)
-        assert rc == 1, f"(d) dropped required check should DRIFT, got exit {rc}"
-        print("  (d) required check dropped (pr-classified): DRIFT exit 1  OK")
-
-        # (e) pull_request approvals re-raised 0 -> 1 (in the ruleset)
-        m = copy.deepcopy(secure); m["rulesets"][0]["required_approving_review_count"] = 1
-        rc = check_actual(m)
-        assert rc == 1, f"(e) ruleset approvals re-raised should DRIFT, got exit {rc}"
-        print("  (e) approvals re-raised 0->1 (ruleset): DRIFT exit 1  OK")
-
-        # (e2) main branch-protection re-imposing 1 approval (the theatrical trap — distinct key)
-        m = copy.deepcopy(secure); m["branch_protection"]["max_required_approvals"] = 1
-        rc = check_actual(m)
-        assert rc == 1, f"(e2) branch-protection approvals should DRIFT, got exit {rc}"
-        print("  (e2) branch-protection re-imposes 1 approval: DRIFT exit 1  OK")
-
-        # (f) ruleset missing entirely
-        m = copy.deepcopy(secure); m["rulesets"] = []
-        rc = check_actual(m)
-        assert rc == 1, f"(f) missing ruleset should DRIFT, got exit {rc}"
-        print("  (f) ruleset loop-merge-gates missing: DRIFT exit 1  OK")
+        # VALUE weakenings
+        drift(lambda rs, m: rs.update(enforcement="disabled"), "(b) enforcement active->disabled")
+        drift(lambda rs, m: rs.update(bypass_actors=[{"actor_id": 1, "actor_type": "Team"}]), "(c) bypass_actors non-empty")
+        drift(lambda rs, m: rs.update(required_status_checks=["smoke", "graph", "publish-gate"]), "(d) required check dropped")
+        drift(lambda rs, m: rs.update(required_approving_review_count=1), "(e) ruleset approvals 0->1")
+        drift(lambda rs, m: m["branch_protection"].update(max_required_approvals=1), "(e2) branch-protection re-imposes 1 approval")
+        drift(lambda rs, m: m.update(rulesets=[]), "(f) ruleset loop-merge-gates missing")
+        # DELETION/TARGET weakenings that normalize to a coincidentally-meets-expected value (codex P1 fixes)
+        drift(lambda rs, m: rs.update(rule_types=["required_status_checks", "deletion", "non_fast_forward"]), "(i) pull_request rule deleted (no PR required)")
+        drift(lambda rs, m: rs.update(rule_types=["pull_request", "required_status_checks"]), "(j) deletion+non_fast_forward rules deleted")
+        drift(lambda rs, m: rs.update(ref_name_include=["refs/heads/nonexistent"]), "(k) ruleset retargeted off main")
+        drift(lambda rs, m: rs.update(target="tag"), "(k2) ruleset target changed off branch")
 
         # (g) robustness: malformed actual JSON -> clean exit 2, NOT a traceback
         bad = os.path.join(d, "bad.json")

@@ -6,7 +6,9 @@
       "enforcement": "active",
       "bypass_actors": [],
       "required_status_checks": ["smoke", "graph", "publish-gate", "pr-classified"],
-      "required_approving_review_count": 0
+      "required_approving_review_count": 0,
+      "required_rule_types": ["pull_request", "required_status_checks", "deletion", "non_fast_forward"],
+      "target_includes": ["refs/heads/main"]
     }
   ],
   "branch_protection": {
