@@ -154,13 +154,11 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 
 ## Next Steps
 
-0. **MERGE PR #23 (fixes-only) — the ONE immediate founder action** (codex Option-4 disposition,
-   2026-07-21): `gh pr merge 23 --squash --admin` once checks are green (classic protection needs
-   1 approval a solo owner can't give; `--admin` overrides it). **Do NOT POST the 8pf ruleset
-   first** — it requires `publish-gate`/`pr-classified` checks whose workflows aren't on main or
-   `fix/l2-fixes` → PR #23 would deadlock with no bypass. After merge: main gets the
-   publish_gate word-split P1 fix + eval/env/docs fixes; PR #21/#22 stay open as parking for the
-   loop infra; rebase v3 on main at leisure (carried hunks are identical → drop out cleanly).
+0. ~~MERGE PR #23~~ **DONE 2026-07-21 (founder-authorized): merged `--squash --admin` after all
+   checks green (graph 3m57s). Merge commit = main tip = `37aade5`; verified the publish_gate
+   word-split P1 fix LIVE on main (`publish_gate.sh:19,22` NUL-delimited; `for f in $FILES` gone).**
+   PR #21/#22 stay open as parking for the loop infra; rebase v3 on main at leisure (carried hunks
+   are identical → drop out cleanly). Ruleset (8pf) still NOT applied — correct while parked.
 
 1. **(DEFERRED — only if/when the cloud loop earns runtime need) FOUNDER GO-LIVE chain** (explored
    2026-07-21; runbook `audits/006_GO_LIVE_RUNBOOK.md`, local-only; auth now = `CLAUDE_CODE_OAUTH_TOKEN`
@@ -238,9 +236,9 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
   repo, not this branch; codex PASS.)
 - `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening) +
   `45a5687` (**OAuth rewire**: `claude_code_oauth_token`). PR #22 → v3, OPEN — **PARKED** with #21.
-- `fix/l2-fixes` — off `main` (`3096310`): `fea79f8` (12-file L2 fix carry, byte-identical to v3's
-  versions). **PR #23 → main, OPEN — the one PR meant to merge** (`--admin`; no ruleset POST first).
-- `main` → `3096310`.
+- `fix/l2-fixes` — off `3096310`: `fea79f8` (12-file L2 fix carry, byte-identical to v3's versions).
+  **PR #23 MERGED 2026-07-21** (`--squash --admin`) → squash commit `37aade5`.
+- `main` → **`37aade5`** (= PR #23 squash; publish_gate P1 fix live, verified).
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
 ## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-21)
