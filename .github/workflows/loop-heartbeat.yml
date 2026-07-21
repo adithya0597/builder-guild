@@ -40,22 +40,20 @@ jobs:
           MAX_AGE_HOURS: '33'   # 24h cadence + 9h grace: tolerates one late/jittery run, fires on sustained death (~54h next day)
         run: |
           set -euo pipefail
-          # heartbeat: SYNC-REGION-BEGIN (extracted verbatim by scratchpad/oy7/test_heartbeat_stale.sh — keep PURE: grep/sort/arithmetic only, no date/gh/runtime deps)
-          newest_run_id() {
-            # stdin: run-log text. stdout: newest ISO-8601 UTC run_id, empty if none.
-            # ISO-8601 UTC 'Z' strings sort lexically == chronologically, so sort|tail -1 is the newest.
+          # heartbeat: SYNC-REGION-BEGIN (extracted verbatim by the local staleness test — keep PURE: grep/sort/awk/arithmetic only, no date/gh/runtime deps)
+          newest_valid_run_id() {
+            # arg $1: max acceptable ISO-8601-Z (now + small skew). stdin: run-log text.
+            # stdout: newest ISO-Z run_id that is <= max, empty if none. ISO-Z sorts lexically ==
+            # chronologically, so we FILTER future stamps OUT (awk $0<=max, string compare) BEFORE
+            # sort|tail. That's the fix: a typo/clock-skew far-future stamp can never become the
+            # freshness basis — the newest GENUINE (past) stamp wins, so a dead loop with a stray
+            # future entry still reads STALE. (Also filters future-month typos like 2026-13-.. since
+            # they lexically exceed max.) Fail-safe: future noise cannot suppress an alert.
+            local max="$1"
             grep -oE '"run_id": *"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z"' \
               | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z' \
+              | awk -v max="$max" 'length($0) && $0 <= max' \
               | sort | tail -1 || true
-          }
-          sanitize_epoch() {
-            # args: <newest_epoch|empty> <now_epoch>. exit 0 = usable, 1 = reject (=> caller sets empty => STALE).
-            # Rejects empty AND any epoch more than 1h in the FUTURE (typo / clock skew): an unbounded
-            # future timestamp would read as "not stale" AND auto-close a live alert — silent blinding.
-            local e="$1" now="$2"
-            [ -n "$e" ] || return 1
-            [ "$e" -gt "$(( now + 3600 ))" ] && return 1
-            return 0
           }
           stale_by_age() {
             # args: <newest_epoch|empty> <now_epoch> <max_age_hours>. exit 0 = STALE, 1 = fresh.
@@ -71,22 +69,23 @@ jobs:
           MARKER='<!-- loop-heartbeat -->'
           TITLE='⏰ loop-triage: missed run'
 
+          now_epoch="$(date -u +%s)"
+          # Max acceptable stamp = now + 5min skew. NTP'd GitHub runners differ by seconds; anything
+          # further ahead is a typo/clock bug and must NOT count as "the loop just ran". Future stamps
+          # are filtered here so the newest GENUINE past stamp drives the decision.
+          max_iso="$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
           if [ -f "$RUNLOG" ]; then
-            newest="$(newest_run_id < "$RUNLOG")"
+            newest="$(newest_valid_run_id "$max_iso" < "$RUNLOG")"
           else
             newest=''            # file vanished -> treat as missed (fail-safe), don't crash the monitor
           fi
 
-          now_epoch="$(date -u +%s)"
           newest_epoch=''
           if [ -n "$newest" ]; then
-            # Guard the parse: a malformed-but-regex-passing stamp (month 13, hour 99) must NOT crash the
-            # step under set -e and vanish the alert. Parse failure OR a rejected (future) epoch both fall
-            # through to empty -> STALE (fail-safe). `2>/dev/null` + the || keep set -e from killing us.
-            if newest_epoch="$(date -u -d "$newest" +%s 2>/dev/null)" && sanitize_epoch "$newest_epoch" "$now_epoch"; then
-              :   # usable
-            else
-              echo "heartbeat: dropping unusable run_id '${newest}' (unparseable or future) -> treating as missed" >&2
+            # newest is already <= now+skew (future filtered above). Only guard a lexically-valid but
+            # calendar-invalid stamp (e.g. day 32, hour 99) from crashing date under set -e -> empty -> STALE.
+            if ! newest_epoch="$(date -u -d "$newest" +%s 2>/dev/null)"; then
+              echo "heartbeat: newest run_id '${newest}' unparseable -> treating as missed" >&2
               newest=''; newest_epoch=''
             fi
           fi
