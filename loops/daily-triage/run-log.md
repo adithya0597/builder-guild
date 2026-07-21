@@ -33,3 +33,12 @@ signal (e.g. the word "audit" in git history) is **not** a run and must not be r
 ```json
 {"run_id": "2026-07-20T20:03:23Z", "pattern": "daily-triage", "duration_s": 600, "items_found": 4, "actions_taken": 0, "escalations": 0, "tokens_estimate": 15000, "outcome": "report-only"}
 ```
+
+## Verifier Verdicts
+
+Independent maker/checker verdicts on loop-produced diffs live in `verifier-log.md` (prose, not
+run entries — kept out of the JSON above so they don't masquerade as triage runs to the heartbeat).
+
+- **2026-07-21** — run `2026-07-20T20:03:23Z` (commit `223b285`) was independently verified by the
+  `loop-verifier`: **REJECT** (2 docs-vs-state citation mismatches) → maker fix `d500757` → **APPROVE**.
+  Full verdicts: `verifier-log.md`. (bead btj — first actor-independent verification on a real diff.)
