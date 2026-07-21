@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false   # agent gets no git credential of any kind
       - uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e   # v1.0.178 (pinned; first-party)
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # founder-set; OAuth alt: claude_code_oauth_token
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}   # founder-set; API-key alt: anthropic_api_key
           prompt: |
             Run the loop-triage skill (.claude/skills/loop-triage/SKILL.md) exactly:
             mandatory pre-run checks (STATE flag kill switch; budget caps from
