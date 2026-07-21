@@ -58,8 +58,9 @@ FIXTURE_ROLE = "engineering"
 FIXTURE_NAMESPACE = "engineering"
 OTHER_ROLE = "finance"        # a different role's serve() must NOT surface the OCR node
 FIXTURE_KEY = "doc:ocr-spi-42-scan"
-# Local embed model (must be cached for the $0/offline T4 demo). Mirrors embed.MODEL.
-EMBED_MODEL = "google/embeddinggemma-300m"
+# Local embed model (must be cached for the $0/offline T4 demo).
+# Mirrors embed.py's env resolution: BG_EMBED_MODEL with the same default.
+EMBED_MODEL = os.environ.get("BG_EMBED_MODEL", "google/embeddinggemma-300m")
 
 
 def _make_fixture_png(path):
@@ -222,14 +223,15 @@ def t3_env_at_call_time():
 # ---------------------------------------------------------------------------
 
 def _check_neo4j():
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7688")
     try:
         from neo4j import GraphDatabase
-        drv = GraphDatabase.driver(os.environ.get("NEO4J_URI", "bolt://localhost:7688"), auth=("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain")))
+        drv = GraphDatabase.driver(uri, auth=("neo4j", os.environ.get("NEO4J_PASSWORD", "companybrain")))
         drv.verify_connectivity()
         drv.close()
         return True
     except Exception as e:
-        print(f"DEPENDENCY: Neo4j unreachable at bolt://localhost:7688 ({type(e).__name__}: {e}).")
+        print(f"DEPENDENCY: Neo4j unreachable at {uri} ({type(e).__name__}: {e}).")
         print("  T4 (neo4j demo) requires the live graph. T1-T3 are standalone.")
         return False
 
