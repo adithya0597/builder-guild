@@ -157,8 +157,16 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 0. ~~MERGE PR #23~~ **DONE 2026-07-21 (founder-authorized): merged `--squash --admin` after all
    checks green (graph 3m57s). Merge commit = main tip = `37aade5`; verified the publish_gate
    word-split P1 fix LIVE on main (`publish_gate.sh:19,22` NUL-delimited; `for f in $FILES` gone).**
-   PR #21/#22 stay open as parking for the loop infra; rebase v3 on main at leisure (carried hunks
-   are identical → drop out cleanly). Ruleset (8pf) still NOT applied — correct while parked.
+   PR #21/#22 stay open as parking for the loop infra. Ruleset (8pf) still NOT applied — correct
+   while parked. **CORRECTION (codex-refuted 2026-07-21, was: "rebase at leisure — carried hunks
+   drop out cleanly"): rebasing v3 onto main is NOT clean.** Final-tree equality (0-byte diff on
+   the 12 files) ≠ clean commit replay: `faf9bfb` carries a pre-`e18cf12` `.env.example` blob →
+   `git merge-tree faf9bfb^ origin/main faf9bfb` = "changed in both" — a real conflict with a
+   data-loss trap (careless resolve drops `LANGFUSE_HOST`/`BG_EMBED_MODEL`; resolve = keep main's
+   lines). Codex scores: rebase-now 2/10; merge-main-into-v3 6/10 (verified clean no-op);
+   do-nothing 8/10; close-parking-PRs+fresh-branches 9/10. Decision = founder's; any future
+   go-live rebase inherits the same `faf9bfb` trap — resolution recipe above. Full verdict:
+   `scratchpad/codex-rebase-verdict.md` (session-local).
 
 1. **(DEFERRED — only if/when the cloud loop earns runtime need) FOUNDER GO-LIVE chain** (explored
    2026-07-21; runbook `audits/006_GO_LIVE_RUNBOOK.md`, local-only; auth now = `CLAUDE_CODE_OAUTH_TOKEN`
