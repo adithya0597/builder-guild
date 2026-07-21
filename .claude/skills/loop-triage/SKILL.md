@@ -38,6 +38,32 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
 - Calibration status (`03-evals`): are any roles `CALIBRATED`? did the last run refuse / grant?
 - The current `loops/daily-triage/STATE.md` (what the loop already knows)
 
+## Settings-Tamper Sentinel (live GitHub settings vs committed intent)
+
+A no-bypass ruleset protects *merges*, not its own on/off switch: an admin can disable the
+`loop-merge-gates` ruleset out-of-band, merge, and re-enable it — nothing else notices. This step
+detects that drift: the LIVE branch-protection + rulesets diverging from the committed intent in
+`loops/daily-triage/settings-expected.json`. It is a **read-only DETECTOR** — never edit a live
+setting (remediation is human-gated). Run it in the report path, NOT as a pre-run gate: `gh` may be
+unavailable and that must not block the run.
+
+1. **Snapshot live settings (fail-safe).**
+   `python3 loops/daily-triage/settings_sentinel.py fetch-live > /tmp/icg-actual.json`
+   `fetch-live` never crashes on `gh` failure — it emits an `{"gh":"unavailable",...}` sentinel and exits 0.
+2. **gh unavailable → Watch.** If `/tmp/icg-actual.json` is the `{"gh":"unavailable",...}` sentinel →
+   **Watch**: "could not verify live settings (gh unavailable) — cannot confirm the `loop-merge-gates`
+   ruleset is intact." Do NOT run `check` (nothing to compare against).
+3. **Otherwise compare against committed intent.**
+   `python3 loops/daily-triage/settings_sentinel.py check --expected loops/daily-triage/settings-expected.json --actual /tmp/icg-actual.json`
+   - **Exit 1 (DRIFT)** → **High-Priority**: "settings drift/tamper detected: `<the DRIFT: lines>`" ·
+     `Suggested loop action: human-gate` — NEVER auto-fix a live setting; surface it for a human.
+   - **Exit 0** → note in **Graph & Invariant Health / CI Gates**: "live settings match committed intent."
+
+`check` is deterministic and gh-free (`settings_sentinel.py --self-test` proves the drift detection
+offline); the watched keys are the intended-secure posture (ruleset active, bypass empty, the 4
+required checks present, approvals not re-raised). Live "a deliberate ruleset change appears in the
+next loop run report" is founder-gated — it needs the `loop-merge-gates` ruleset live (bead 8pf).
+
 ## Output (rewrite STATE.md sections)
 
 ### High-Priority (act-worthy today)

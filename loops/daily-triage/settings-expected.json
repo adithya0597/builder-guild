@@ -1,0 +1,15 @@
+{
+  "_comment": "Minimum secure posture for the loop-triage settings sentinel — source of truth for the intended LIVE GitHub settings, derived from .github/rulesets/loop-merge-gates.json (what bead 8pf applies). settings_sentinel.py check treats this as a MINIMUM the live snapshot must MEET; any weakening is DRIFT. Doubles as documentation of what 8pf must keep applied.",
+  "rulesets": [
+    {
+      "name": "loop-merge-gates",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "required_status_checks": ["smoke", "graph", "publish-gate", "pr-classified"],
+      "required_approving_review_count": 0
+    }
+  ],
+  "branch_protection": {
+    "max_required_approvals": 0
+  }
+}
