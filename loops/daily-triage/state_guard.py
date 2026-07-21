@@ -62,9 +62,57 @@ def cmd_stamp(args):
         "field": args.field,
         "post_hash": args.hash,
     }
-    with open(args.attrib_log, "a") as f:  # append-only; never truncates/rewrites
-        f.write(json.dumps(entry) + "\n")
+    try:
+        with open(args.attrib_log, "a") as f:  # append-only; never truncates/rewrites
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:  # bad dir / non-writable — clean nonzero, not a traceback (match cmd_hash)
+        print(f"ERROR: cannot append to {args.attrib_log}: {e}", file=sys.stderr)
+        return 1
     return 0
+
+
+def _last_post_hash(attrib_log):
+    """Return the post_hash of the last non-blank line in the attrib log, or None if the log is
+    absent/empty. Raises ValueError if the last line is present but not valid JSON."""
+    last = None
+    try:
+        with open(attrib_log) as f:
+            for line in f:
+                if line.strip():
+                    last = line
+    except OSError:
+        return None  # no log yet -> bootstrap (nothing stamped)
+    if last is None:
+        return None
+    return json.loads(last).get("post_hash")  # ValueError propagates -> caller treats as unattributed
+
+
+def cmd_verify(args):
+    """Cross-run attribution gate: exit 1 if STATE.md's current hash != the last stamped post_hash
+    (a write landed WITHOUT a matching stamp — e.g. a crash/abort after write, before stamp; the
+    within-run stamp is an agent step, so this next-run check is what makes a skip DETECTABLE rather
+    than a silent, permanent un-attributed mutation). Exit 0 when they match, or when there are no
+    stamps yet (bootstrap / first run)."""
+    try:
+        cur = _sha256(args.state)
+    except OSError as e:
+        print(f"ERROR: cannot hash {args.state}: {e}", file=sys.stderr)
+        return 1
+    try:
+        last_hash = _last_post_hash(args.attrib_log)
+    except ValueError:
+        print(f"UNATTRIBUTED: {args.attrib_log} last line is not valid JSON", file=sys.stderr)
+        return 1
+    if last_hash is None:
+        return 0  # bootstrap: no prior stamp to verify against
+    if cur == last_hash:
+        return 0
+    print(
+        f"UNATTRIBUTED: {args.state} ({cur[:12]}) != last stamped post_hash "
+        f"({(last_hash or '')[:12]}) — a STATE.md write landed without a stamp",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _selftest(args=None):
@@ -114,6 +162,22 @@ def _selftest(args=None):
         assert first["author"] == "loop-triage" and first["post_hash"] == new_hash
         print(f"  (c) stamp append-only: 2 lines, fields {sorted(first)}  OK")
 
+        # (e) verify: attribution is a real cross-run check, not skippable prose.
+        vlog = os.path.join(d, "verify.attrib.jsonl")
+        # bootstrap: no log yet -> verify passes (nothing to attribute against)
+        assert cmd_verify(argparse.Namespace(state=state, attrib_log=vlog)) == 0, "bootstrap verify should pass"
+        # stamp the current STATE.md, then verify PASSES (write is attributed)
+        h_now = _sha256(state)
+        cmd_stamp(argparse.Namespace(attrib_log=vlog, author="loop-triage",
+                                     session="run-2", hash=h_now, field="STATE.md"))
+        assert cmd_verify(argparse.Namespace(state=state, attrib_log=vlog)) == 0, "verify should pass when STATE.md matches last stamp"
+        # now mutate STATE.md WITHOUT stamping -> next-run verify DETECTS the unattributed write
+        with open(state, "w") as f:
+            f.write("High-Priority: edited but NOT stamped\n")
+        rc = cmd_verify(argparse.Namespace(state=state, attrib_log=vlog))
+        assert rc == 1, f"verify should FAIL on an unstamped write, got exit {rc}"
+        print("  (e) verify detects unattributed (unstamped) write: exit 1  OK")
+
     print("STATE_GUARD_OK")
     return 0
 
@@ -140,6 +204,11 @@ def main(argv=None):
     ps.add_argument("--hash", required=True)
     ps.add_argument("--field", default="STATE.md")
     ps.set_defaults(func=cmd_stamp)
+
+    pv = sub.add_parser("verify", help="exit 1 if STATE.md was written without a matching stamp (unattributed)")
+    pv.add_argument("state")
+    pv.add_argument("attrib_log")
+    pv.set_defaults(func=cmd_verify)
 
     pt = sub.add_parser("test", help="alias for --self-test")
     pt.set_defaults(func=_selftest)

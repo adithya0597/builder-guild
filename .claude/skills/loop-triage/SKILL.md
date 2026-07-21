@@ -23,6 +23,12 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
    `loops/daily-triage/budget.md` on-exceed protocol.
 3. **Run log — MANDATORY append.** After EVERY run — completed, aborted, or early-exited —
    append an entry to `loops/daily-triage/run-log.md`: date, outcome, approx tokens. No silent runs.
+4. **Attribution integrity — verify the previous run's write was stamped.** Run
+   `python3 loops/daily-triage/state_guard.py verify loops/daily-triage/STATE.md loops/daily-triage/STATE.attrib.jsonl`.
+   Exit 1 (`UNATTRIBUTED`) means STATE.md was written since the last stamp — the previous run wrote and
+   then crashed/skipped step 4 (an un-attributed mutation). Surface it in this run's report (Watch) and
+   re-stamp the current state before rewriting. Exit 0 = attributed (or bootstrap: no attrib log yet). This
+   is what makes the write attribution a real cross-run CHECK, not skippable prose.
 
 ## Inputs (the loop provides these)
 - CI status (`ci.yml` + per-layer gates: invariant sweep, recall selftest, abstain contract) — last 24h
@@ -51,8 +57,11 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
 
 STATE.md has NO concurrency guard — a human edit or an overlapping run silently clobbers, with no
 record of who wrote what. Every STATE.md rewrite MUST route through `loops/daily-triage/state_guard.py`
-(pure stdlib, no deps). This is a CHECK POINT, not advice: skipping `precheck` clobbers a concurrent
-writer. Order matters — hash at read, precheck the *still-on-disk* file right before the rewrite:
+(pure stdlib, no deps). Honest enforcement ceiling: `precheck` (this run) and the pre-run `verify`
+(next run, check 4 above) are real exit-code gates; the write + `stamp` between them are agent steps.
+Skipping `precheck` risks a clobber; skipping `stamp` is *detected* by the next run's `verify`. So it is
+enforced as an agent instruction within a run, and made detectable across runs. Order matters — hash at
+read, precheck the *still-on-disk* file right before the rewrite:
 
 1. **Hash at read — record the precondition token.** Before triage, capture the read hash:
    `H=$(python3 loops/daily-triage/state_guard.py hash loops/daily-triage/STATE.md)`. Keep `H`; do NOT write STATE.md yet.
@@ -79,5 +88,9 @@ writer. Order matters — hash at read, precheck the *still-on-disk* file right 
 - 2026-07-17: pre-run checks added because the kill switch and budget caps were previously
   declared (loops/daily-triage/LOOP.md:38, loops/daily-triage/budget.md:21, loops/safety.md:64) but checked nowhere in the
   actual run path (loopcoherence-1, -3). Declaration without a check point = no enforcement.
-- 2026-07-21: STATE.md write protocol is a real check point (cites `loops/daily-triage/state_guard.py hash/precheck/stamp`),
-  not prose — same lineage as the 2026-07-17 gotcha. If a future edit softens it back to advice, the concurrency guard is gone: keep the `precheck` exit-1 = ABORT gate concrete.
+- 2026-07-21: STATE.md write protocol has TWO real exit-code gates — `precheck` (this run, exit 1 = ABORT
+  don't clobber) and `verify` (next-run pre-run check 4, exit 1 = the previous write was un-stamped). The
+  write + `stamp` between them are agent steps: honest ceiling is "agent instruction within a run, detectable
+  across runs" — NOT a hook/CI mutex. A codex pass (2026-07-21, lbd) caught the first cut over-claiming the
+  attribution half as "a check, not prose" when `stamp` had no gate (repeating the 2026-07-17 anti-pattern);
+  `verify` is that gate. If a future edit drops `verify` from check 4 or softens `precheck`, the guard is back to prose.
