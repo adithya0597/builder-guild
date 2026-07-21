@@ -11,10 +11,14 @@ name: loop-heartbeat
 
 on:
   schedule:
-    - cron: '17 15 * * *'   # ~6h after the 09:17 triage cadence -> a same-day miss shows by mid-afternoon
+    - cron: '17 15 * * *'   # runs 6h after the 09:17 triage cadence
   workflow_dispatch:
 
 permissions: {}             # least privilege by default; the job opts into what it needs
+
+concurrency:
+  group: loop-heartbeat     # serialize cron + manual dispatch so two runs can't both create the issue
+  cancel-in-progress: false
 
 jobs:
   heartbeat:
@@ -33,7 +37,7 @@ jobs:
       - name: alert if loop-triage missed its run
         env:
           GH_TOKEN: ${{ github.token }}
-          MAX_AGE_HOURS: '30'   # 24h cadence + 6h grace
+          MAX_AGE_HOURS: '33'   # 24h cadence + 9h grace: tolerates one late/jittery run, fires on sustained death (~54h next day)
         run: |
           set -euo pipefail
           # heartbeat: SYNC-REGION-BEGIN (extracted verbatim by scratchpad/oy7/test_heartbeat_stale.sh — keep PURE: grep/sort/arithmetic only, no date/gh/runtime deps)
@@ -44,9 +48,18 @@ jobs:
               | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z' \
               | sort | tail -1 || true
           }
+          sanitize_epoch() {
+            # args: <newest_epoch|empty> <now_epoch>. exit 0 = usable, 1 = reject (=> caller sets empty => STALE).
+            # Rejects empty AND any epoch more than 1h in the FUTURE (typo / clock skew): an unbounded
+            # future timestamp would read as "not stale" AND auto-close a live alert — silent blinding.
+            local e="$1" now="$2"
+            [ -n "$e" ] || return 1
+            [ "$e" -gt "$(( now + 3600 ))" ] && return 1
+            return 0
+          }
           stale_by_age() {
             # args: <newest_epoch|empty> <now_epoch> <max_age_hours>. exit 0 = STALE, 1 = fresh.
-            # empty newest (no parseable entry) => STALE — fail-safe: silence must not read as healthy.
+            # empty newest (no parseable/valid entry) => STALE — fail-safe: silence must not read as healthy.
             local newest_epoch="$1" now="$2" max_h="$3"
             [ -n "$newest_epoch" ] || return 0
             [ "$(( now - newest_epoch ))" -gt "$(( max_h * 3600 ))" ] && return 0
@@ -65,10 +78,17 @@ jobs:
           fi
 
           now_epoch="$(date -u +%s)"
+          newest_epoch=''
           if [ -n "$newest" ]; then
-            newest_epoch="$(date -u -d "$newest" +%s)"   # GNU date on the ubuntu runner
-          else
-            newest_epoch=''
+            # Guard the parse: a malformed-but-regex-passing stamp (month 13, hour 99) must NOT crash the
+            # step under set -e and vanish the alert. Parse failure OR a rejected (future) epoch both fall
+            # through to empty -> STALE (fail-safe). `2>/dev/null` + the || keep set -e from killing us.
+            if newest_epoch="$(date -u -d "$newest" +%s 2>/dev/null)" && sanitize_epoch "$newest_epoch" "$now_epoch"; then
+              :   # usable
+            else
+              echo "heartbeat: dropping unusable run_id '${newest}' (unparseable or future) -> treating as missed" >&2
+              newest=''; newest_epoch=''
+            fi
           fi
 
           # One lookup, reused by whichever branch fires. update-not-spam: list open issues and let the
@@ -82,7 +102,7 @@ jobs:
               age_h="$(( (now_epoch - newest_epoch) / 3600 ))"
               detail="Newest logged run: \`${newest}\` — ${age_h}h old (threshold ${MAX_AGE_HOURS}h)."
             else
-              detail="No parseable run_id in ${RUNLOG}."
+              detail="No valid (parseable, non-future) run_id in ${RUNLOG}."
             fi
             body="$(
               printf '%s\n\n' "$MARKER"
