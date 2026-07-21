@@ -41,6 +41,7 @@ budget + run log + safety + a real, committed run). **Two report-only runs logge
 
 - Default: **no auto-merge.** Denylist + auto-merge policy + MCP least-privilege in [loops/safety.md](../safety.md).
 - Live state spine: STATE.md in this folder (`loops/daily-triage/`).
+- STATE.md writes are guarded: every rewrite runs `state_guard.py` hash→precheck→write→stamp (content-hash optimistic lock rejects a stale read; append-only `STATE.attrib.jsonl` attributes each write) — see the loop-triage skill's Write Protocol.
 
 ## Maturity (honest)
 

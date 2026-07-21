@@ -47,6 +47,26 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
 ### Noise / Ignore
 - Brief list of what was looked at and dismissed (tunes this skill).
 
+## MANDATORY STATE.md Write Protocol (guarded write: hash → precheck → write → stamp)
+
+STATE.md has NO concurrency guard — a human edit or an overlapping run silently clobbers, with no
+record of who wrote what. Every STATE.md rewrite MUST route through `loops/daily-triage/state_guard.py`
+(pure stdlib, no deps). This is a CHECK POINT, not advice: skipping `precheck` clobbers a concurrent
+writer. Order matters — hash at read, precheck the *still-on-disk* file right before the rewrite:
+
+1. **Hash at read — record the precondition token.** Before triage, capture the read hash:
+   `H=$(python3 loops/daily-triage/state_guard.py hash loops/daily-triage/STATE.md)`. Keep `H`; do NOT write STATE.md yet.
+2. **Triage in memory.** Build all sections without touching STATE.md on disk (so step 3 checks the file as it was read).
+3. **Precheck before the write — the optimistic lock.** Immediately before overwriting STATE.md:
+   `python3 loops/daily-triage/state_guard.py precheck loops/daily-triage/STATE.md "$H"`.
+   - Exit 0 → on-disk file unchanged since read; proceed to write.
+   - Exit 1 (STALE on stderr) → someone changed STATE.md mid-run. **ABORT the write — do NOT clobber.**
+     Append a schema-consistent no-op entry to `loops/daily-triage/run-log.md` (`"outcome": "no-op"`, `"reason": "stale-state"`) and stop.
+4. **Write, then stamp — attributed, append-only.** After the rewrite lands:
+   `NEW=$(python3 loops/daily-triage/state_guard.py hash loops/daily-triage/STATE.md)` then
+   `python3 loops/daily-triage/state_guard.py stamp loops/daily-triage/STATE.attrib.jsonl --author loop-triage --session <run_id> --hash "$NEW" --field High-Priority`.
+   The attribution log (`loops/daily-triage/STATE.attrib.jsonl`) is append-only, one JSON line per write — never edit or truncate it.
+
 ## Rules
 - Brutally concise; structured markdown, one-line items, explicit `Suggested loop action`.
 - High-Priority only if a reasonable engineer wants to know today.
@@ -59,3 +79,5 @@ write the graph, never modify `01-context` enforcement or `03-evals` calibration
 - 2026-07-17: pre-run checks added because the kill switch and budget caps were previously
   declared (loops/daily-triage/LOOP.md:38, loops/daily-triage/budget.md:21, loops/safety.md:64) but checked nowhere in the
   actual run path (loopcoherence-1, -3). Declaration without a check point = no enforcement.
+- 2026-07-21: STATE.md write protocol is a real check point (cites `loops/daily-triage/state_guard.py hash/precheck/stamp`),
+  not prose — same lineage as the 2026-07-17 gotcha. If a future edit softens it back to advice, the concurrency guard is gone: keep the `precheck` exit-1 = ABORT gate concrete.
