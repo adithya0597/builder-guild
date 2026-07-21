@@ -24,7 +24,7 @@ regression as of this run.
   evidence/digest, citation-checker hardening, STATE.md hash preconditions, risk-tier
   classifier, settings-tamper alarm). Suggested loop action: none until founder go.
 - [ ] **Issues #15 + #16 open** — #15 `cal2_erag.py` golden-set defaults (touches `cal*` =
-  denylist), #16 missing `.key` uniqueness constraints (StatusValue/Decision). Both pre-existing,
+  denylist), #16 missing `.key` uniqueness constraints (StatusValue/Document). Both pre-existing,
   mapped to excluded bug beads. Suggested loop action: **human-gate**; never auto-fix.
 - [ ] **loop-audit heuristic vs relocated files** — external scorers pattern-matching root-level
   `STATE.md`/`LOOP.md` may mis-score after the 2026-07-20 move (documented in loops/README.md).
@@ -51,7 +51,7 @@ regression as of this run.
 <!-- ci.yml (smoke DB-free + graph Neo4j) + cla.yml + pr-gate.yml. -->
 - Branch `feat/loop-engineering-v3`: run `29773277829` **success** (smoke + graph) ·
   2026-07-20T19:49Z · sha `2546e25`; cla run `29773274550` success.
-- `main`: run `29653108642` **success** · 2026-07-18T17:02Z · sha `3096310`.
+- `main`: ci run `29452819406` **success** (smoke + graph) · 2026-07-15T21:41Z · sha `3096310` (CodeQL `29653108642` also green 07-18, but it is a security scan, not the smoke+graph gate).
 
 ## Recent Noise (ignored this run)
 
