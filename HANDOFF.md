@@ -12,10 +12,11 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-20/21 (loop-operationalization buildloop — 3 sections shipped) — newest; the
-research + 07-16..19 blocks follow.** Ran `/buildloop` on three sections in sequence; the independent
-codex/verifier review caught a real bug in EACH. All merged fast-forward to v3 (verified end-state:
-`git rev-parse HEAD` = `origin/feat/loop-engineering-v3` = **`702a11e`**, clean tree).
+**Session 2026-07-20/21 (loop-operationalization buildloop — 6 beads worked, 5 shipped + 1 can't-fix) —
+newest; the research + 07-16..19 blocks follow.** Ran `/buildloop` on six loop beads in sequence; the
+independent codex/verifier review caught a REAL bug in every shipped one (and killed a false-passing
+one before it merged). Verified end-state: `git rev-parse HEAD` = `origin/feat/loop-engineering-v3` =
+**`b5c21e0`**, clean tree.
 - **ye0 + hot (merge gates)** → `.github/workflows/classify.yml` (deterministic t0/t1/t2 risk-tier
   required check, 14/14 tier cases) + `publish-gate.yml` (CI twin of the disclosure gate) +
   `.github/rulesets/loop-merge-gates.json` (payload). **Codex P1-B (real, silent):** `tools/publish_gate.sh`
@@ -34,6 +35,24 @@ codex/verifier review caught a real bug in EACH. All merged fast-forward to v3 (
   real main ci run = `29452819406`). Maker fix `d500757` → re-verify **APPROVE**. Verdict recorded in
   `loops/daily-triage/verifier-log.md`, referenced from `run-log.md`. Maker/checker split validated
   end-to-end (the independent checker caught a defect the actor missed).
+- **lbd (STATE.md hybrid hardening)** → `loops/daily-triage/state_guard.py` — content-hash optimistic
+  lock (`precheck` rejects a stale-read write) + attributed writes (`stamp`) + `verify` cross-run gate,
+  wired into the loop-triage skill. **codex P2 (real):** attribution was unenforced prose (a crash after
+  write, before stamp = permanent undetectable un-attributed mutation, repeating the 2026-07-17
+  anti-pattern) — fixed with `verify` as pre-run check 4. `e94dbff`.
+- **icg (settings-tamper sentinel)** → `loops/daily-triage/settings_sentinel.py` — live GitHub settings
+  vs committed intent (`settings-expected.json`); drift → High-Priority human-gate. **codex 3× P1
+  false-negatives (empirically proven):** delete-pull_request-rule / delete-force-push-rules /
+  retarget-off-main all read as "match" — fixed by comparing EFFECTIVE rules for main (`fe67a7c`). Then
+  a **background security review** found a 4th (parser-validator differential: last-wins `_index_by_name`
+  + unread `ref_name.exclude`) — fixed post-merge on v3 (`b5c21e0`).
+- **d0j (check_citations bot-wall) → CAN'T-FIX, reverted.** Target was the SHARED cross-project explore
+  checker (`~/Projects/.claude/skills/explore/check_citations.py`, symlinked in — user approved touching
+  it). Premise obsolete: the checker ALREADY yields **zero false-dead** (6 reddit sources correctly
+  UNKNOWN, not dead). Auto-*resolving* reddit is impossible unauthenticated — reddit login-walls every
+  route (www 26-word shell · `.json` 403 · old.reddit 302→login-wall that 200s with 2103 generic words
+  for real AND fake threads). An honest-route attempt **false-passed the login wall** (codex P1 + own
+  confirm — my "successful" run was 6 false-passes) → REVERTED before shipping. No code change.
 
 **Session 2026-07-20 (research → operationalization wiring) — the 07-16..19 block
 follows.** Ran, in order: (1) `/explore` `loopmature-20260720a` — FULL CLOSE PASS, 8-lane external
@@ -173,9 +192,11 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
 
 - `feat/loop-engineering-v3` — `main` (`3096310`) + loop scaffolding + bl-20260717 fixes + `loops/`
   restructure (`2546e25`) + loop run/docs-truth (`223b285`, `21b28c6`, `2b1cbd2`) + **merge-gates**
-  (`f815e14`) + **heartbeat** (`3a33176`) + **btj verifier/STATE-fix** (`d500757`, `702a11e`). Tip
-  **`702a11e`** = `origin/feat/loop-engineering-v3` (clean tree). PR #21 → main, OPEN/**BLOCKED** — the
-  theatrical 1-approval a solo owner can't self-satisfy; beads `8pf`/`006` are the fix.
+  (`f815e14`) + **heartbeat** (`3a33176`) + **btj verifier/STATE-fix** (`d500757`, `702a11e`) +
+  **state-guard** (`e94dbff`) + **settings-sentinel** (`fe67a7c`) + **sentinel differential fix**
+  (`b5c21e0`). Tip **`b5c21e0`** = `origin/feat/loop-engineering-v3` (clean tree). PR #21 → main,
+  OPEN/**BLOCKED** — the theatrical 1-approval a solo owner can't self-satisfy; beads `8pf`/`006` are the fix.
+  (d0j touched only the SHARED `~/Projects/.claude/skills/explore/check_citations.py` and was reverted — not on this branch.)
 - `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening).
   PR #22 → `feat/loop-engineering-v3`, OPEN/MERGEABLE, CI green.
 - `main` → `3096310`.
@@ -183,10 +204,11 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
 
 ## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-21)
 
-- Session 2026-07-20/21 (buildloop sections): closed **4** — `ye0`, `hot` (merge gates), `oy7`
-  (heartbeat), `btj` (verifier-on-real-diff), all via close-check PASS + reason recorded. Opened **3**
-  — `8pf` (founder: apply ruleset), `2h9` (org-ruleset proper fix for the self-editing ceiling), `ave`
-  (ship SYNC-REGION drift tests to CI). Live count: **22 open of 148 total** (`bd stats`: Closed 126).
+- Session 2026-07-20/21 (buildloop sections): closed **7** — `ye0`, `hot` (merge gates), `oy7`
+  (heartbeat), `btj` (verifier-on-real-diff), `lbd` (state-guard), `icg` (settings-sentinel) all via
+  close-check PASS + reason; `d0j` closed can't-fix (reddit unresolvable unauthenticated, honest-route
+  reverted). Opened **3** — `8pf` (founder: apply ruleset), `2h9` (org-ruleset proper fix), `ave` (ship
+  SYNC-REGION drift tests to CI). Live count: **19 open of 148 total** (`bd stats`: Closed 129).
 - Session 2026-07-20 (earlier): opened **13** — `nfy` (explore loopmature, CLOSED), epic `tic`, `phy`
   (CLOSED), `8cj` (CLOSED), `ye0`, `btj`, `oy7`, `d0j`, `lbd`, `hot`, `icg`, `006`, `bgo`.
   Closed **3** (`nfy`, `phy`, `8cj`). Live count: **23 open of 145 total** (`bd stats`:
