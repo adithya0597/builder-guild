@@ -63,6 +63,11 @@ shipped to v3 (ye0+hot, oy7, btj, lbd, icg); the sixth (d0j) is a fix to the SHA
   Meta-lesson (captured): my offline self-tests kept encoding fictional oembed shapes (dead→thin, then
   deleted→404, then removed→`[removed]`) and stayed green while false-passing live — a mock is only as good
   as a LIVE measurement of the real response shapes.
+- **Explored the 2 remaining founder-gated beads (006, bgo)** — findings folded into Next Steps 0. Key
+  correction: **006 is not a standalone secret-set** — scheduled workflows fire only from the default
+  branch, so the loop can't go live until `loop-triage.yml` reaches `main` (chain: merge PR#22→v3 →
+  unblock PR#21 via `8pf` or admin-override → merge PR#21→main → set secret → cron fires). bgo: grounded
+  recommendation = Anthropic spend cap + accept-residual (harden-runner optional; free-tier has a DoH bypass).
 
 **Session 2026-07-20 (research → operationalization wiring) — the 07-16..19 block
 follows.** Ran, in order: (1) `/explore` `loopmature-20260720a` — FULL CLOSE PASS, 8-lane external
@@ -131,22 +136,15 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 
 ## Next Steps
 
-0. **USER DECISIONS PENDING (in priority order):**
-   (a) **Merge PR #22** (`feat/loop-scheduler` → `feat/loop-engineering-v3`) — scheduler + kill
-       switch, CI green (ci+pr-gate+cla), close-check exit 0. Then merge PR #21 → main.
-   (b) **After #22 merges, bead `builder-guild-006` (merge-gated proofs):** set repo **secret**
-       `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) + **variable** `LOOP_PAUSE_ALL=false`;
-       then prove on the default branch — a scheduled `loop-triage` run appears in `gh run list`,
-       and with `LOOP_PAUSE_ALL=true` the next run's triage job shows *skipped*. This is what turns
-       "L1 tested" into "L1 operational".
-   (c) **Bead `builder-guild-bgo` (RED-TEAM residual, your threat-model call):** API-key egress from
-       the agent job — bounded to credit-burn (rotatable; write token never meets untrusted code).
-       Decide: add `harden-runner` egress-allowlist + org spend cap, OR accept-as-residual at L1.
-   (d) **Bead `builder-guild-8pf` (LIVE ruleset apply — the ye0/hot payload; founder settings action):**
-       `gh api repos/adithya0597/builder-guild/rulesets --method POST --input .github/rulesets/loop-merge-gates.json`
-       then drop `required_approving_review_count`→0 AND confirm no-bypass — turns the theatrical live
-       config real (see `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`; the committed JSON is inert until POSTed).
-   (e) Remove/relocate this HANDOFF.md before merging the branch to `main` (its own header's rule).
+0. **FOUNDER GO-LIVE — the 2 remaining beads are ENTANGLED, do them in this order** (explored 2026-07-21;
+   006 is NOT a standalone secret-set — scheduled workflows fire ONLY from the default branch, so the loop
+   can't go live until `loop-triage.yml` reaches `main`):
+   1. **Merge PR #22** (`feat/loop-scheduler` → `feat/loop-engineering-v3`) — now `OPEN/CLEAN`, CI green, close-check exit 0. Puts the scheduler on v3.
+   2. **Unblock PR #21** (v3 → main, currently `OPEN/BLOCKED` — main requires 1 approval a solo owner can't self-satisfy). Two ways: **bead `8pf`** — apply the ruleset (drops `required_approving_review_count`→0, no-bypass): `gh api repos/adithya0597/builder-guild/rulesets --method POST --input .github/rulesets/loop-merge-gates.json` (the committed JSON is inert until POSTed; see `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`); OR a one-time **admin-override merge** (works because `enforce_admins=false`). 8pf is the durable fix.
+   3. **Merge PR #21 → main.** Now `loop-triage.yml` is on the default branch and the cron (09:17 daily) can fire. **Remove/relocate this HANDOFF.md first** (its own header's rule — not for `main`).
+   4. **Set secret + variable** (neither exists yet — verified via `gh secret/variable list`): repo **secret** `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) + **variable** `LOOP_PAUSE_ALL=false`. *(I never handle credentials — this step is yours.)*
+   5. **Bead `builder-guild-006` proofs** (auto-satisfied by the next cron): a scheduled run appears in `gh run list`; flip `LOOP_PAUSE_ALL=true` → next run's triage job shows *skipped* in `gh run view`; confirm its commit touches ONLY `loops/daily-triage/STATE.md`+`run-log.md`. Turns "L1 tested" → "L1 operational".
+   - **Bead `builder-guild-bgo` (egress residual — explored 2026-07-21, RECOMMENDATION ready):** the triage agent job holds `ANTHROPIC_API_KEY` + can egress + reads repo content (injection vector), but impact is **bounded to credit-burn** (job is `contents:read` + `persist-credentials:false` — no write token/git-cred, can't inject code/push; `--max-turns 25`; schedule/dispatch only, no fork input; first-party SHA-pinned action; P2-2 prompt-hardening shipped). **Recommend: set an Anthropic spend cap (dedicated low-limit CI workspace/key — caps the only real impact, zero workflow complexity) + accept the exfil residual with rationale.** `harden-runner` egress-allowlist is optional defense-in-depth but adds a 3rd-party dep and its free tier has a documented DoH-bypass (not airtight). Recording the rationale satisfies bgo either way. Sources: stepsecurity.io harden-runner docs + GHSA-46g3-37rh-v698 (DoH bypass) + platform.claude.com spend-limits-api.
    **Epic `tic` children — ALL 7 BUILD BEADS DONE:** `phy`,`8cj` (scheduler, PR#22), `ye0`,`hot` (merge
    gates), `oy7` (heartbeat), `btj` (verifier-on-real-diff), `lbd` (state-guard), `icg` (settings-sentinel),
    `d0j` (check_citations reddit-oembed, codex PASS). **The only 2 open are FOUNDER-GATED:** `006` (set the
