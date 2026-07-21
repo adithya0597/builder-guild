@@ -12,7 +12,25 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-20/21 (loop-operationalization buildloop — 6 beads, all delivered) — newest; the
+**Session 2026-07-21 (PR disposition: codex adversarial verdict → split PR #23) — newest.**
+Founder asked what the open PRs actually do given the goal was the LOCAL harness. Codex adversarial
+review (gpt-5.5 high effort, 31 spot-checks; verdict: `scratchpad/codex-pr-options-verdict.md`,
+session-local) **REJECTED** my "dormant merge" recommendation as home-team bias (motivated
+consolidation — bundling loop infra with the bug fixes) and scored **Option 4 (split) 8/10**:
+land ONLY the L2 fixes on main; loop infra stays on the branch until it earns runtime need.
+Delivered: **PR #23** (`fix/l2-fixes` `fea79f8` → main, 12 files +46/−33) — publish_gate.sh
+NUL-delimit P1 (functionally re-proven: spaced-filename `ghp_` token BLOCKS exit 1; main's copy
+still passes it CLEAN), eval URI fixes, run_guard/setup_a2/.env.example/docs-truth, lessons.md
+gitignore. Carried files byte-identical to v3's versions (empty diff). Early checks pass,
+smoke/graph pending at write time. Also this session: **loop-triage.yml rewired to
+`claude_code_oauth_token`** (PR #22 head `45a5687`; subscription token, $0 marginal, makes bgo's
+spend-cap moot) + go-live runbook written (`audits/006_GO_LIVE_RUNBOOK.md`, local-only, now
+partially superseded). **Deadlock trap found (my addition beyond codex):** POSTing the 8pf ruleset
+while a fixes-only PR is open self-deadlocks — it requires `publish-gate`/`pr-classified` checks
+whose workflows exist only on v3, and `bypass_actors:[]` binds even the admin. Beads: `4z0`
+opened+closed (split PR); `006`/`8pf` annotated DEFERRED. Lesson captured (home-team bias tells).
+
+**Session 2026-07-20/21 (loop-operationalization buildloop — 6 beads, all delivered); the
 research + 07-16..19 blocks follow.** Ran `/buildloop` on six loop beads in sequence; the independent
 codex/verifier review caught a REAL bug in EACH (and killed a false-passing one before it merged). Five
 shipped to v3 (ye0+hot, oy7, btj, lbd, icg); the sixth (d0j) is a fix to the SHARED explore checker in
@@ -136,13 +154,23 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
 
 ## Next Steps
 
-0. **FOUNDER GO-LIVE — the 2 remaining beads are ENTANGLED, do them in this order** (explored 2026-07-21;
-   006 is NOT a standalone secret-set — scheduled workflows fire ONLY from the default branch, so the loop
-   can't go live until `loop-triage.yml` reaches `main`):
+0. **MERGE PR #23 (fixes-only) — the ONE immediate founder action** (codex Option-4 disposition,
+   2026-07-21): `gh pr merge 23 --squash --admin` once checks are green (classic protection needs
+   1 approval a solo owner can't give; `--admin` overrides it). **Do NOT POST the 8pf ruleset
+   first** — it requires `publish-gate`/`pr-classified` checks whose workflows aren't on main or
+   `fix/l2-fixes` → PR #23 would deadlock with no bypass. After merge: main gets the
+   publish_gate word-split P1 fix + eval/env/docs fixes; PR #21/#22 stay open as parking for the
+   loop infra; rebase v3 on main at leisure (carried hunks are identical → drop out cleanly).
+
+1. **(DEFERRED — only if/when the cloud loop earns runtime need) FOUNDER GO-LIVE chain** (explored
+   2026-07-21; runbook `audits/006_GO_LIVE_RUNBOOK.md`, local-only; auth now = `CLAUDE_CODE_OAUTH_TOKEN`
+   via `claude setup-token`, wired at PR #22 head `45a5687`; 006 is NOT a standalone secret-set —
+   scheduled workflows fire ONLY from the default branch, so the loop can't go live until
+   `loop-triage.yml` reaches `main`):
    1. **Merge PR #22** (`feat/loop-scheduler` → `feat/loop-engineering-v3`) — now `OPEN/CLEAN`, CI green, close-check exit 0. Puts the scheduler on v3.
    2. **Unblock PR #21** (v3 → main, currently `OPEN/BLOCKED` — main requires 1 approval a solo owner can't self-satisfy). Two ways: **bead `8pf`** — apply the ruleset (drops `required_approving_review_count`→0, no-bypass): `gh api repos/adithya0597/builder-guild/rulesets --method POST --input .github/rulesets/loop-merge-gates.json` (the committed JSON is inert until POSTed; see `audits/SOLO_OPERATOR_AND_L2_SLIMMING.md`); OR a one-time **admin-override merge** (works because `enforce_admins=false`). 8pf is the durable fix.
    3. **Merge PR #21 → main.** Now `loop-triage.yml` is on the default branch and the cron (09:17 daily) can fire. **Remove/relocate this HANDOFF.md first** (its own header's rule — not for `main`).
-   4. **Set secret + variable** (neither exists yet — verified via `gh secret/variable list`): repo **secret** `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) + **variable** `LOOP_PAUSE_ALL=false`. *(I never handle credentials — this step is yours.)*
+   4. **Set secret + variable** (neither exists yet — verified via `gh secret/variable list`): repo **secret** `CLAUDE_CODE_OAUTH_TOKEN` (generate via `claude setup-token`; the workflow reads this input as of `45a5687` — API-key alt requires re-editing line 40) + **variable** `LOOP_PAUSE_ALL=false`. *(I never handle credentials — this step is yours.)*
    5. **Bead `builder-guild-006` proofs** (auto-satisfied by the next cron): a scheduled run appears in `gh run list`; flip `LOOP_PAUSE_ALL=true` → next run's triage job shows *skipped* in `gh run view`; confirm its commit touches ONLY `loops/daily-triage/STATE.md`+`run-log.md`. Turns "L1 tested" → "L1 operational".
    - **Bead `builder-guild-bgo` (egress residual — explored 2026-07-21, RECOMMENDATION ready):** the triage agent job holds `ANTHROPIC_API_KEY` + can egress + reads repo content (injection vector), but impact is **bounded to credit-burn** (job is `contents:read` + `persist-credentials:false` — no write token/git-cred, can't inject code/push; `--max-turns 25`; schedule/dispatch only, no fork input; first-party SHA-pinned action; P2-2 prompt-hardening shipped). **Recommend: set an Anthropic spend cap (dedicated low-limit CI workspace/key — caps the only real impact, zero workflow complexity) + accept the exfil residual with rationale.** `harden-runner` egress-allowlist is optional defense-in-depth but adds a 3rd-party dep and its free tier has a documented DoH-bypass (not airtight). Recording the rationale satisfies bgo either way. Sources: stepsecurity.io harden-runner docs + GHSA-46g3-37rh-v698 (DoH bypass) + platform.claude.com spend-limits-api.
    **Epic `tic` children — ALL 7 BUILD BEADS DONE:** `phy`,`8cj` (scheduler, PR#22), `ye0`,`hot` (merge
@@ -152,19 +180,19 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
    ruleset live — also founder), `2h9` (org-ruleset proper fix for the self-editing ceiling), `ave` (ship
    the SYNC-REGION drift tests to CI). Nothing else is buildable without founder action — the highest-leverage
    next step is `006` (setting the secret unlocks live proof for the whole loop stack).
-1. ~~Run the loop again~~ **DONE 2026-07-20 (manual test run on the relocated structure — STATE.md rewritten, run-log entry 2).** Scheduled runs remain the real operational bar (bead builder-guild-phy). Manual re-run recipe:
+2. ~~Run the loop again~~ **DONE 2026-07-20 (manual test run on the relocated structure — STATE.md rewritten, run-log entry 2).** Scheduled runs remain the real operational bar (bead builder-guild-phy). Manual re-run recipe:
    `/loop 1d Run loop-triage. Update loops/daily-triage/STATE.md. No code edits.` Let it rewrite the state file, then append
    one honest entry to `loops/daily-triage/run-log.md` and commit. That converts "L1 setup" into "L1 operational".
-2. **Resolve the `.claude/` merge collision — BEFORE merging to `main`.** The
+3. **Resolve the `.claude/` merge collision — BEFORE merging to `main`.** The
    `docs/reconcile-roadmap-calibration` branch gitignores `.claude` and symlinks it (Conductor
    monorepo-harness symlink, set in the gitignored `.conductor/settings.local.toml`). This branch
    commits **tracked** `.claude/skills/` + `.claude/agents/`. You cannot both symlink-over and track
    `.claude/`. Recommended: let the repo own `.claude/` — drop the `.claude` gitignore line and the
    `ln -sfn … .claude` setup line; the committed `.claude/` then travels to Conductor worktrees
    natively, and the global `~/.claude` discipline travels anyway.
-3. **Merge** `feat/loop-engineering-v3` → `main` (and the docs branch → `main`) when ready. That also
+4. **Merge** `feat/loop-engineering-v3` → `main` (and the docs branch → `main`) when ready. That also
    moves Builder Guild's canonical loop-audit score off the `main` floor.
-4. (Optional) Remove this `HANDOFF.md` before merging to `main`.
+5. (Optional) Remove this `HANDOFF.md` before merging to `main`.
 
 ## Open Questions
 
@@ -203,18 +231,23 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
   restructure (`2546e25`) + loop run/docs-truth (`223b285`, `21b28c6`, `2b1cbd2`) + **merge-gates**
   (`f815e14`) + **heartbeat** (`3a33176`) + **btj verifier/STATE-fix** (`d500757`, `702a11e`) +
   **state-guard** (`e94dbff`) + **settings-sentinel** (`fe67a7c`) + **sentinel differential fix**
-  (`b5c21e0`) + **handoff** (`b836230`). Tip **`b836230`** = `origin/feat/loop-engineering-v3` (clean
-  tree; this handoff edit advances it by one commit). PR #21 → main, OPEN/**BLOCKED** — the theatrical
-  1-approval a solo owner can't self-satisfy; beads `8pf`/`006` are the fix.
+  (`b5c21e0`) + **handoffs** (`b836230`, `f989509`). Tip = `git rev-parse HEAD` (this handoff edit
+  advances it past `f989509`). PR #21 → main, OPEN/**BLOCKED** (theatrical 1-approval) — now
+  **PARKED per codex Option-4**; loop infra stays here until it earns runtime need.
   (d0j is a fix to the SHARED `~/Projects/.claude/skills/explore/check_citations.py` @ `93e0fd5` — that
   repo, not this branch; codex PASS.)
-- `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening).
-  PR #22 → `feat/loop-engineering-v3`, OPEN/MERGEABLE, CI green.
+- `feat/loop-scheduler` — off `21b28c6`: `7a858cc` (scheduler impl) + `c377d4c` (review-hardening) +
+  `45a5687` (**OAuth rewire**: `claude_code_oauth_token`). PR #22 → v3, OPEN — **PARKED** with #21.
+- `fix/l2-fixes` — off `main` (`3096310`): `fea79f8` (12-file L2 fix carry, byte-identical to v3's
+  versions). **PR #23 → main, OPEN — the one PR meant to merge** (`--admin`; no ruleset POST first).
 - `main` → `3096310`.
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
 ## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-21)
 
+- Session 2026-07-21 (PR disposition): opened+closed **`4z0`** (split PR #23 delivered; proofs in
+  close reason). Annotated `006` + `8pf` **DEFERRED** (Option-4: loop infra parked; 8pf carries the
+  ruleset-deadlock warning). Live count: **19 open of 149 total** (`bd stats`: Closed 130).
 - Session 2026-07-20/21 (buildloop sections): closed **7** — `ye0`, `hot` (merge gates), `oy7`
   (heartbeat), `btj` (verifier-on-real-diff), `lbd` (state-guard), `icg` (settings-sentinel) all via
   close-check PASS + reason; `d0j` closed **FIXED** (reddit resolved via oembed in the shared explore
@@ -222,8 +255,9 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
   Opened **3** — `8pf` (founder: apply ruleset), `2h9` (org-ruleset proper fix), `ave` (ship SYNC-REGION
   drift tests to CI). Live count: **19 open of 148 total** (`bd stats`: Closed 129).
 - **Of the 9 epic-`tic` loop beads: 7 DONE** (`ye0`,`hot`,`oy7`,`btj`,`lbd`,`icg`,`d0j`); 2 open, both
-  FOUNDER-GATED — `006` (set `ANTHROPIC_API_KEY` secret + `LOOP_PAUSE_ALL` → loop goes live) and `bgo`
-  (egress-hardening decision). Nothing else is buildable without founder action.
+  FOUNDER-GATED **and now DEFERRED with the parked loop infra** — `006` (`CLAUDE_CODE_OAUTH_TOKEN`
+  secret + `LOOP_PAUSE_ALL` → loop goes live; unreachable until `loop-triage.yml` ever reaches main)
+  and `bgo` (egress call — OAuth choice makes the spend-cap moot; accept-residual rationale staged).
 - Session 2026-07-20 (earlier): opened **13** — `nfy` (explore loopmature, CLOSED), epic `tic`, `phy`
   (CLOSED), `8cj` (CLOSED), `ye0`, `btj`, `oy7`, `d0j`, `lbd`, `hot`, `icg`, `006`, `bgo`.
   Closed **3** (`nfy`, `phy`, `8cj`). Live count: **23 open of 145 total** (`bd stats`:
