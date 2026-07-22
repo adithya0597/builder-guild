@@ -6,7 +6,7 @@ name: classify
 # this job has zero conditions that could stop it running. It reads the PR's changed
 # files and assigns a risk tier (t2 > t1 > t0, max wins) so downstream automation can
 # route on it:
-#   t2 = highest-risk surface (.github/CI, security, calibration, schema, secrets)
+#   t2 = highest-risk surface (.github/CI, .claude loop config, security, calibration, schema, secrets)
 #        -> founder-highlights digest comment (t2-highlight job)
 #   t0 = state-files-only (daily-triage STATE.md / run-log.md) -> auto-merge eligible
 #   t1 = ordinary change (everything else)
@@ -50,7 +50,7 @@ jobs:
               b="${f##*/}"
               tier=t1
               case "$f" in
-                .github/*|.claude/scripts/*|01-context/schema/*|tools/publish_gate.sh|loops/safety.md|01-context/src/serve.py|01-context/src/abstain.py|01-context/src/ladder.py)
+                .github/*|.claude/*|01-context/schema/*|tools/publish_gate.sh|loops/safety.md|01-context/src/serve.py|01-context/src/abstain.py|01-context/src/ladder.py)
                   tier=t2 ;;
                 loops/daily-triage/STATE.md|loops/daily-triage/run-log.md)
                   tier=t0 ;;
