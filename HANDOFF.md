@@ -12,6 +12,8 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
+**Session 2026-07-23 (routeloop maiden run — pre-ship-adversarial-review promoted).** New blended skill /routeloop (Claude boss/codex worker over the full buildloop spine, named review teams incl BLUE-TEAM) ran its first pipeline: promoted the loop-miner-mined pre-ship-adversarial-review loop from staging to tracked v3 — commit `2175a3a` (6 files +173). Trail: 2 codex red passes (8 raw->6 accepted: verdict-spoofing P1, self-report trap, kill-switch alignment, semantic done-check, schema drift) + EXPOSE lens (3 doc-truth) + blue-team battery (all repros re-run, done-check fixture-proven) + confirm PASS 0 findings; close-check exit 0; run rl-20260723-promo in ledger. Skill /pre-ship-adversarial-review now live (manual L1; heartbeat coverage deferred until scheduled). Also this session: /loop-miner shipped to shared repo (3f70184), /routeloop authored (f192321), route skill upgraded from ccg-workflow scan.
+
 **Session 2026-07-21 (PR disposition: codex adversarial verdict → split PR #23) — newest.**
 Founder asked what the open PRs actually do given the goal was the LOCAL harness. Codex adversarial
 review (gpt-5.5 high effort, 31 spot-checks; verdict: `scratchpad/codex-pr-options-verdict.md`,
