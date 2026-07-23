@@ -12,6 +12,8 @@ loops/
     STATE.md           ← durable state the loop reads + rewrites each run
     run-log.md         ← append-only run history (one honest entry per real run)
     budget.md          ← caps (runs/day, tokens/day) + on-exceed protocol
+  pre-ship-adversarial-review/ ← manually-invoked L1 reviewer-gap detector (report-only)
+    LOOP.md / STATE.md / run-log.md / budget.md ← same per-loop contract
 ```
 
 ## The per-loop contract
