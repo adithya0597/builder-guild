@@ -53,8 +53,7 @@ selftest, abstain contract — see `.github/workflows/ci.yml`).
   `settings_sentinel.py`, `tools/publish_gate.sh`) makes zero model calls and gates any
   agent's output identically; loop skills reference models by tier, resolved at
   runtime — no model ids are hardcoded in this repo.
-- The one deliberately pinned edge lives upstream in the shared harness
-  (`Morynt-AI/morynt-harness`, internal): its two-vendor build loops
-  (`route`/`routeloop`) pin worker and boss models as an explicit owner override with
-  preflight revalidation (HALT on id rejection — never silent substitution). See that
-  repo's README, "Model and harness agnosticism".
+- The one deliberately pinned edge lives upstream in the shared internal harness:
+  its two-vendor build loops pin worker and boss models as an explicit owner override
+  with preflight revalidation (HALT on id rejection — never silent substitution).
+  Documented in that harness's own README.
