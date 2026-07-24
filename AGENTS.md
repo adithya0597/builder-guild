@@ -43,5 +43,18 @@ selftest, abstain contract — see `.github/workflows/ci.yml`).
 ## Loop operation (this repo)
 
 - Daily triage: `loop-triage` skill → `loops/daily-triage/STATE.md` (report-only, L1).
+- Reviewer-gap watch: `pre-ship-adversarial-review` skill → `loops/pre-ship-adversarial-review/STATE.md` (report-only, L1, manually invoked).
 - Assisted fixes (L2): `loop-verifier` agent (maker/checker, default REJECT) + isolated worktree; PR with human review.
 - Never auto-merge to denylist paths (`loops/safety.md`). No loop touches `01-context` enforcement or `03-evals` calibration without a human gate.
+
+## Model and harness agnosticism (harness posture)
+
+- Three layers: the deterministic core (ledger checkers, `state_guard.py`,
+  `settings_sentinel.py`, `tools/publish_gate.sh`) makes zero model calls and gates any
+  agent's output identically; loop skills reference models by tier, resolved at
+  runtime — no model ids are hardcoded in this repo.
+- The one deliberately pinned edge lives upstream in the shared harness
+  (`Morynt-AI/morynt-harness`, internal): its two-vendor build loops
+  (`route`/`routeloop`) pin worker and boss models as an explicit owner override with
+  preflight revalidation (HALT on id rejection — never silent substitution). See that
+  repo's README, "Model and harness agnosticism".
