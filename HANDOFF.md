@@ -12,7 +12,35 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-23 (routeloop maiden run — pre-ship-adversarial-review promoted).** New blended skill /routeloop (Claude boss/codex worker over the full buildloop spine, named review teams incl BLUE-TEAM) ran its first pipeline: promoted the loop-miner-mined pre-ship-adversarial-review loop from staging to tracked v3 — commit `2175a3a` (6 files +173). Trail: 2 codex red passes (8 raw->6 accepted: verdict-spoofing P1, self-report trap, kill-switch alignment, semantic done-check, schema drift) + EXPOSE lens (3 doc-truth) + blue-team battery (all repros re-run, done-check fixture-proven) + confirm PASS 0 findings; close-check exit 0; run rl-20260723-promo in ledger. Skill /pre-ship-adversarial-review now live (manual L1; heartbeat coverage deferred until scheduled). Also this session: /loop-miner shipped to shared repo (3f70184), /routeloop authored (f192321), route skill upgraded from ccg-workflow scan.
+**Session 2026-07-22/23 (flywheel arc: loop-miner → routeloop → promotion → published) — newest.**
+Full chain shipped and dogfooded end-to-end:
+- **/loop-miner** (buildloop bl-20260722-loopminer, /route embedded — codex built both scripts):
+  mines session history → 5-clause deterministic gate → L1 emitter. Dogfood on live 19-file/14d
+  corpus: 3 candidates, gate passed 2 / failed 1 on named clauses; harvest also proved a negative
+  (tracker-drift = 0 human asks, already hook-automated). Shared repo `3f70184`.
+- **/routeloop** authored (`2163a48` → full spine + per-stage model/effort table + named review
+  teams incl BLUE-TEAM at founder's correction, `f192321`): buildloop structure, route role-split
+  as law (Claude never writes deliverables; codex xhigh everywhere; no Claude-implements fallback).
+- **Maiden run** (rl-20260723-promo): promoted pre-ship-adversarial-review from staging → tracked
+  v3 `2175a3a` (6 files +173). Trail: 2 codex red passes (8 raw→6 accepted: verdict-spoofing P1,
+  self-report trap, kill-switch/safety alignment, semantic done-check, schema drift) + EXPOSE lens
+  (3 doc-truth: README qualifier, unenforced logging claim, gh fallback) + blue-team battery (every
+  repro re-run; done-check fixture-proven both directions) + scope-pinned confirm PASS 0 findings;
+  close-check exit 0. Skill `/pre-ship-adversarial-review` live (manual L1; heartbeat coverage
+  deferred until scheduled — stated in LOOP.md, not smuggled).
+- **Published to `Morynt-AI/morynt-harness`** (private org mirror, pre-existing — updated not
+  clobbered): `5f1a647` (13 files: route/routeloop/loop-miner/pre-ship skills + buildloop sync +
+  loop template + README flywheel doc, 17→21 skills) + `2381308` (README "Model and harness
+  agnosticism" — 3 layers: deterministic core zero-model, tier-based middle, pinned two-vendor edge
+  with revalidation). Disclosure gate CLEAN on exact surfaces both pushes.
+- **AGENTS.md harness posture** (`9fdf2ce`, then `36e92f2` genericizing the private repo name off
+  the public surface at founder's yes): agnosticism layers + pre-ship loop registered in Loop
+  operation. route skill also upgraded from the ccg-workflow scan (5 adoptions incl BUILD-REPORT +
+  claimed-vs-actual, worker-failure policy; 5 anti-patterns rejected; report in session scratchpad).
+- Route substrate gotchas captured live: brew-PATH shadowing kills `-s workspace-write` (missing
+  code-mode-host → dispatch via full nvm path); headless exec without explicit `-s` + `</dev/null`
+  hangs on stdin (detect: high etime + ~0 CPU); `--json` session-id capture failed once → fresh-exec
+  fallback (resume rounds still unexercised); `cmd | tail; echo $?` reads the pipe tail (bit 4×).
 
 **Session 2026-07-21 (PR disposition: codex adversarial verdict → split PR #23) — newest.**
 Founder asked what the open PRs actually do given the goal was the LOCAL harness. Codex adversarial
@@ -243,7 +271,9 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
   restructure (`2546e25`) + loop run/docs-truth (`223b285`, `21b28c6`, `2b1cbd2`) + **merge-gates**
   (`f815e14`) + **heartbeat** (`3a33176`) + **btj verifier/STATE-fix** (`d500757`, `702a11e`) +
   **state-guard** (`e94dbff`) + **settings-sentinel** (`fe67a7c`) + **sentinel differential fix**
-  (`b5c21e0`) + **handoffs** (`b836230`, `f989509`). Tip = `git rev-parse HEAD` (this handoff edit
+  (`b5c21e0`) + **handoffs** (`b836230`, `f989509`) + **07-22/23 flywheel arc** (`2175a3a`
+  pre-ship loop, `9fdf2ce`/`36e92f2` AGENTS posture; PR#22 merged into v3 by founder as `130a2e1`
+  + classify hardenings `b3ba348`/`92dc30c`). Tip = `git rev-parse HEAD` (this handoff edit
   advances it past `f989509`). PR #21 → main, OPEN/**BLOCKED** (theatrical 1-approval) — now
   **PARKED per codex Option-4**; loop infra stays here until it earns runtime need.
   (d0j is a fix to the SHARED `~/Projects/.claude/skills/explore/check_citations.py` @ `93e0fd5` — that
@@ -255,7 +285,14 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
 - `main` → **`37aade5`** (= PR #23 squash; publish_gate P1 fix live, verified).
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
-## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-21)
+## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-23)
+
+- Session 2026-07-22/23 (flywheel arc): opened+closed **6** — epic `2ux` + `r5n`/`xjb`/`wia`
+  (loop-miner A/B/C), `bm8` (routeloop authoring), `5j2` (pre-ship promotion). All closed with
+  proof trails in reasons. Live count at write time: **22 open of 167 total** (`bd stats`:
+  Closed 145) — totals moved beyond this session's ±6; other sessions are active in the same DB.
+
+### Earlier (2026-07-21 entries follow)
 
 - Session 2026-07-21 (PR disposition): opened+closed **`4z0`** (split PR #23 delivered; proofs in
   close reason). Annotated `006` + `8pf` **DEFERRED** (Option-4: loop infra parked; 8pf carries the
