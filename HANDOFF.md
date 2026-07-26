@@ -12,7 +12,43 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-22/23 (flywheel arc: loop-miner → routeloop → promotion → published) — newest.**
+**Session 2026-07-25/26 (environment only — toolchain + model lineup; NO repo work) — newest.**
+Branch untouched: HEAD = origin = `d890aff`, 0 porcelain, zero beads opened/closed. Everything below
+is host/harness state a successor needs, not branch state.
+- **Claude Code updated**: native install `~/.local/bin/claude` 2.1.219 → **2.1.220** (`claude update`
+  reports up to date). Removed the leftover npm-global copy the updater flagged — `npm -g uninstall`
+  failed twice with `ENOTEMPTY` on its own stale rename target
+  (`node_modules/@anthropic-ai/.claude-code-IIdBrPco`); deleting that temp dir made the uninstall
+  succeed (3 packages removed, `~/.nvm/.../bin/claude` gone). One `claude` on PATH now.
+- **Claude Opus 5 exists** (released **2026-07-24**) — I first answered "no Opus 5, the gen-5
+  flagship is Fable 5", which was WRONG: both my training data and the bundled `claude-api` skill
+  catalog (cached 2026-06-24) predate the release. Corrected via web search + platform docs. Verified
+  facts: `claude-opus-5`, **1M context / 128k max output**, $5/$25 per MTok (same as Opus 4.8),
+  effort defaults `high` on Claude API + Claude Code, knowledge cutoff **May 2026** (newest in the
+  family), Fast mode 2× price / ~2.5× speed. Batch API can reach 300k output via beta header
+  `output-300k-2026-03-24`. Opus 4.1 now deprecated, retires 2026-08-05. Session model was switched
+  to `claude-opus-5` and the **server accepted it on the old 2.1.201 client** — the picker list is
+  client-baked, but a typed model string still routes.
+- **Conductor findings (load-bearing, verified on disk):** the app self-updates — observed
+  **0.77.3 → 0.77.4** mid-session — but an app update does **NOT** refresh the bundled Claude Code
+  agent binary. `~/Library/Application Support/com.conductor.app/agent-binaries/claude/` still
+  contains only `2.1.201` (dir created Jul 8), unchanged across two app updates. That is why
+  `/model` here never lists Opus 5. Conductor does fetch Claude Code itself (binary strings:
+  "Failed to start Claude Code within 2 minutes … taking longer than expected to download") and
+  ships a **Check for Updates** menu item, so the refresh path exists — it just did not fire.
+  **Next action (manual, founder):** ⌘Q Conductor → reopen (or Check for Updates), then verify with
+  `ls "$HOME/Library/Application Support/com.conductor.app/agent-binaries/claude/"` — a `2.1.22x`
+  dir appearing is the proof; the picker follows. Conductor's `settings` table has no
+  custom-binary-path key (checked), so there is no in-app override.
+- **Two harness limits hit, worth knowing:** (1) the Bash tool's sandbox hides processes — `ps -ax`
+  greps for `Conductor`/`claude` return **nothing** even for processes known to be running, so
+  "are other agents mid-flight?" is unanswerable from inside a session; (2) a `nohup … & disown`
+  detached script **did not survive** the tool call — the armed Conductor restart
+  (`scratchpad/conductor-restart.sh`) never executed, wrote no log, and the quit never happened.
+  Self-restarting the host app from inside an agent it owns is not achievable this way; hand it to
+  the founder instead.
+
+**Session 2026-07-22/23 (flywheel arc: loop-miner → routeloop → promotion → published).**
 Full chain shipped and dogfooded end-to-end:
 - **/loop-miner** (buildloop bl-20260722-loopminer, /route embedded — codex built both scripts):
   mines session history → 5-clause deterministic gate → L1 emitter. Dogfood on live 19-file/14d
@@ -285,8 +321,13 @@ Local-only (git-excluded `audits/`, 2026-07-20): `SOLO_OPERATOR_AND_L2_SLIMMING.
 - `main` → **`37aade5`** (= PR #23 squash; publish_gate P1 fix live, verified).
 - `docs/reconcile-roadmap-calibration` → `6382779` — CLAUDE.md + Conductor setup; pushed.
 
-## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-23)
+## Tracker Delta (beads — live `bd list`/`bd stats` at write time, 2026-07-26)
 
+- Session 2026-07-25/26 (environment only): opened **0**, closed **0** — no tracker work; the session
+  touched host toolchain and model config only. Live `bd stats` at write time: **21 open of 169
+  total** (Closed 148, Blocked 6, In Progress 0, Ready 15). Versus the 2026-07-23 snapshot below
+  (22 / 167 / Closed 145) the DB moved **without this session** — other sessions share it, so treat
+  totals as shared state, never as this session's arithmetic.
 - Session 2026-07-22/23 (flywheel arc): opened+closed **6** — epic `2ux` + `r5n`/`xjb`/`wia`
   (loop-miner A/B/C), `bm8` (routeloop authoring), `5j2` (pre-ship promotion). All closed with
   proof trails in reasons. Live count at write time: **22 open of 167 total** (`bd stats`:
