@@ -1,0 +1,144 @@
+name: classify
+
+# Deterministic risk-tier gate. Every PR gets ONE required check — pr-classified —
+# that ALWAYS completes: no paths filter, no branches filter, no kill-switch. A
+# REQUIRED check that gets skipped stays "pending" forever and wedges the merge, so
+# this job has zero conditions that could stop it running. It reads the PR's changed
+# files and assigns a risk tier (t2 > t1 > t0, max wins) so downstream automation can
+# route on it:
+#   t2 = highest-risk surface (.github/CI, .claude loop config, security, calibration, schema, secrets)
+#        -> founder-highlights digest comment (t2-highlight job)
+#   t0 = state-files-only (daily-triage STATE.md / run-log.md) -> auto-merge eligible
+#   t1 = ordinary change (everything else)
+# The classifier is pure bash — no third-party actions, no checkout — which keeps the
+# job supply-chain minimal. Its function body is kept byte-identical to the local test
+# via the SYNC-REGION markers below (scratchpad/hot/test_classify_tier.sh extracts the
+# region verbatim, so the two can never drift).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}          # least privilege by default; each job opts into what it needs
+
+jobs:
+  pr-classified:
+    # REQUIRED check. No `if`, no path/branch filter -> always runs, always concludes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      t2_files: ${{ steps.classify.outputs.t2_files }}
+    steps:
+      - name: classify changed files into a risk tier
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # classify_tier: SYNC-REGION-BEGIN (extracted verbatim by test_classify_tier.sh — keep pure, no runtime deps)
+          classify_tier() {
+            # stdin: newline-delimited changed filenames. stdout: overall tier (one token).
+            # stderr: per-file "<tier>\t<filename>" table. Max wins: t2 > t1 > t0.
+            local overall=t0 f b tier
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              b="${f##*/}"
+              tier=t1
+              case "$f" in
+                .github/*|.claude/*|01-context/schema/*|tools/publish_gate.sh|loops/safety.md|01-context/src/serve.py|01-context/src/abstain.py|01-context/src/ladder.py)
+                  tier=t2 ;;
+                loops/daily-triage/STATE.md|loops/daily-triage/run-log.md)
+                  tier=t0 ;;
+              esac
+              if [ "$tier" != t2 ]; then
+                case "$b" in
+                  cal*.py|CALIBRATED*|.env*|*_key*|*_secret*|docker-compose.yml) tier=t2 ;;
+                esac
+              fi
+              printf '%s\t%s\n' "$tier" "$f" >&2
+              case "$tier" in
+                t2) overall=t2 ;;
+                t1) [ "$overall" = t2 ] || overall=t1 ;;
+              esac
+            done
+            printf '%s\n' "$overall"
+          }
+          # classify_tier: SYNC-REGION-END
+          # this is a REQUIRED check — a transient GitHub 500 on the files API must not
+          # fail it, so retry with backoff (2/4/8/16s) before going red.
+          for attempt in 1 2 3 4 5; do
+            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename' > files.txt; then
+              break
+            fi
+            [ "$attempt" -lt 5 ] || { echo "PR files API still failing after ${attempt} attempts" >&2; exit 1; }
+            echo "PR files API attempt ${attempt} failed; retrying in $((2**attempt))s" >&2
+            sleep "$((2**attempt))"
+          done
+          tier="$(classify_tier < files.txt 2> table.txt)"
+          echo "per-file tiers:"
+          cat table.txt
+          echo "overall tier=${tier}"
+          echo "tier=${tier}" >> "$GITHUB_OUTPUT"
+          # t2 file list for the highlight digest — multiline output, random delimiter
+          # so a filename can never accidentally close the heredoc.
+          d="ghadelim_$(openssl rand -hex 8)"
+          {
+            echo "t2_files<<${d}"
+            awk -F'\t' '$1=="t2"{sub(/^t2\t/,""); print}' table.txt
+            echo "${d}"
+          } >> "$GITHUB_OUTPUT"
+          echo "tier=${tier}" >> "$GITHUB_STEP_SUMMARY"
+
+  t2-highlight:
+    # NOT a required check (conditional -> allowed to skip). Founder-highlights digest.
+    needs: pr-classified
+    if: needs.pr-classified.outputs.tier == 't2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: post or update the founder-highlights marker comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # attacker-controllable filenames arrive as data via env, never via ${{ }}
+          # interpolation inside the script -> no shell-injection surface.
+          T2_FILES: ${{ needs.pr-classified.outputs.t2_files }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- pr-classified -->'
+          body="$(
+            printf '%s\n' "$MARKER"
+            printf '**Founder highlights — this PR touches t2 (highest-risk) surface.**\n\n'
+            printf 'Files that triggered t2:\n'
+            printf '%s\n' "$T2_FILES" | while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              printf -- '- `%s`\n' "$f"
+            done
+          )"
+          # update-not-spam: reuse the existing marker comment if one is already there.
+          cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+                   --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id")"
+          cid="${cid%%$'\n'*}"   # first match only; avoids a SIGPIPE from `head` under pipefail
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" -f body="$body"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$body"
+          fi
+
+  t0-note:
+    # NOT a required check (conditional -> allowed to skip). Log-only signal.
+    needs: pr-classified
+    if: needs.pr-classified.outputs.tier == 't0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: note state-files-only PR
+        run: echo "state-files-only PR — auto-merge eligible"

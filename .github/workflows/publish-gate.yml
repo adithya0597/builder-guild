@@ -1,0 +1,36 @@
+name: publish-gate
+
+# CI twin of the local pre-push disclosure gate (tools/publish_gate.sh). A required check on
+# protected branches: it re-runs the generic (no-overlay) half of the scan the git pre-push hook
+# runs locally, so a secret or public-residue string can't reach a protected branch just because
+# someone pushed with --no-verify or from a machine that never installed the hook. NOTE: the
+# personal/org overlay ($1) lives OUTSIDE the repo by design, so CI structurally can't load it —
+# CI catches the generic patterns; the local hook additionally catches overlay residue. It NEVER re-implements the scan —
+# it invokes the script (rules/git-safety.md). No paths/branch filter and no kill-switch
+# condition on purpose: a required check must never skip, because a skipped run reports as
+# success and the gate would silently open.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # least privilege — the scan only reads the diff
+
+jobs:
+  publish-gate:           # job name = check name the branch ruleset requires
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false   # leave no token in .git/config — the scan needs no auth
+          fetch-depth: 0                # full history so origin/<base_ref> resolves for the reset below
+      - name: scan PR diff for secrets / private residue
+        env:
+          BASE_REF: ${{ github.base_ref }}   # via env, not inlined in run: — GitHub actions-injection guidance
+        run: |
+          # Soft-reset to the PR base so the PR's exact changed files become the staged surface
+          # that publish_gate.sh scans (it reads `git diff --cached`) — the CI equivalent of what
+          # the pre-push hook stages locally.
+          git reset --soft "origin/${BASE_REF}"
+          bash tools/publish_gate.sh
