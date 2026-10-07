@@ -1,0 +1,122 @@
+---
+name: loop-triage
+description: >
+  Triage Builder Guild's CI gates, invariant sweeps, eval/calibration status, and open issues
+  into a concise, prioritized findings report. Signal only — writes STATE.md, never edits code.
+user_invocable: true
+---
+
+# Loop Triage — Builder Guild
+
+You produce a clean, prioritized list of things a maintenance loop should consider. You are
+**signal, not action**: you read, classify, and rewrite STATE.md. You never edit code, never
+write the graph, never modify `01-context` enforcement or `03-evals` calibration.
+
+## MANDATORY Pre-Run Checks (before any triage work)
+
+1. **Kill switch — abort on set.** Check for `loop-pause-all`: a GitHub label on the repo
+   OR a flag line in `loops/daily-triage/STATE.md` High-Priority. If set → ABORT immediately (no triage, no
+   STATE.md rewrite) and append a schema-consistent JSON entry to `loops/daily-triage/run-log.md` (same fields as the format block; `"outcome": "no-op"` plus `"reason": "loop-pause-all"`).
+2. **Budget caps — early-exit when over cap** (caps from `loops/daily-triage/budget.md`): max **2 runs/day**
+   and max **100k tokens/day**. Count today's entries in `loops/daily-triage/run-log.md`; if either cap is
+   already hit → EARLY-EXIT and log a schema-consistent JSON entry (`"outcome": "no-op"`, `"reason": "budget-exceeded"`) per the
+   `loops/daily-triage/budget.md` on-exceed protocol.
+3. **Run log — MANDATORY append.** After EVERY run — completed, aborted, or early-exited —
+   append an entry to `loops/daily-triage/run-log.md`: date, outcome, approx tokens. No silent runs.
+4. **Attribution integrity — verify the previous run's write was stamped.** Run
+   `python3 loops/daily-triage/state_guard.py verify loops/daily-triage/STATE.md loops/daily-triage/STATE.attrib.jsonl`.
+   Exit 1 (`UNATTRIBUTED`) means STATE.md was written since the last stamp — the previous run wrote and
+   then crashed/skipped step 4 (an un-attributed mutation). Surface it in this run's report (Watch) and
+   re-stamp the current state before rewriting. Exit 0 = attributed (or bootstrap: no attrib log yet). This
+   is what makes the write attribution a real cross-run CHECK, not skippable prose.
+
+## Inputs (the loop provides these)
+- CI status (`ci.yml` + per-layer gates: invariant sweep, recall selftest, abstain contract) — last 24h
+- Open issues / PRs (read-only)
+- Recent commits on the working branch (last 24–48h)
+- Invariant-sweep output: namespace isolation, bi-temporal validity, no-LLM-writes
+- Calibration status (`03-evals`): are any roles `CALIBRATED`? did the last run refuse / grant?
+- The current `loops/daily-triage/STATE.md` (what the loop already knows)
+
+## Settings-Tamper Sentinel (live GitHub settings vs committed intent)
+
+A no-bypass ruleset protects *merges*, not its own on/off switch: an admin can disable the
+`loop-merge-gates` ruleset out-of-band, merge, and re-enable it — nothing else notices. This step
+detects that drift: the LIVE branch-protection + rulesets diverging from the committed intent in
+`loops/daily-triage/settings-expected.json`. It is a **read-only DETECTOR** — never edit a live
+setting (remediation is human-gated). Run it in the report path, NOT as a pre-run gate: `gh` may be
+unavailable and that must not block the run.
+
+1. **Snapshot live settings (fail-safe).**
+   `python3 loops/daily-triage/settings_sentinel.py fetch-live > /tmp/icg-actual.json`
+   `fetch-live` never crashes on `gh` failure — it emits an `{"gh":"unavailable",...}` sentinel and exits 0.
+2. **gh unavailable → Watch.** If `/tmp/icg-actual.json` is the `{"gh":"unavailable",...}` sentinel →
+   **Watch**: "could not verify live settings (gh unavailable) — cannot confirm the `loop-merge-gates`
+   ruleset is intact." Do NOT run `check` (nothing to compare against).
+3. **Otherwise compare against committed intent.**
+   `python3 loops/daily-triage/settings_sentinel.py check --expected loops/daily-triage/settings-expected.json --actual /tmp/icg-actual.json`
+   - **Exit 1 (DRIFT)** → **High-Priority**: "settings drift/tamper detected: `<the DRIFT: lines>`" ·
+     `Suggested loop action: human-gate` — NEVER auto-fix a live setting; surface it for a human.
+   - **Exit 0** → note in **Graph & Invariant Health / CI Gates**: "live settings match committed intent."
+
+`check` is deterministic and gh-free (`settings_sentinel.py --self-test` proves the drift detection
+offline); the watched keys are the intended-secure posture (ruleset active, bypass empty, the 4
+required checks present, approvals not re-raised). Live "a deliberate ruleset change appears in the
+next loop run report" is founder-gated — it needs the `loop-merge-gates` ruleset live (bead 8pf).
+
+## Output (rewrite STATE.md sections)
+
+### High-Priority (act-worthy today)
+- One-line description · why it matters (risk/impact) · suggested loop action · rough effort.
+- Qualifies: a failing invariant sweep (namespace leak, temporal violation), a red CI gate, a calibration regression.
+
+### Watch
+- Lower urgency, same format.
+
+### Graph & Invariant Health / Eval Status / CI Gates
+- Refresh the standing sections with current values.
+
+### Noise / Ignore
+- Brief list of what was looked at and dismissed (tunes this skill).
+
+## MANDATORY STATE.md Write Protocol (guarded write: hash → precheck → write → stamp)
+
+STATE.md has NO concurrency guard — a human edit or an overlapping run silently clobbers, with no
+record of who wrote what. Every STATE.md rewrite MUST route through `loops/daily-triage/state_guard.py`
+(pure stdlib, no deps). Honest enforcement ceiling: `precheck` (this run) and the pre-run `verify`
+(next run, check 4 above) are real exit-code gates; the write + `stamp` between them are agent steps.
+Skipping `precheck` risks a clobber; skipping `stamp` is *detected* by the next run's `verify`. So it is
+enforced as an agent instruction within a run, and made detectable across runs. Order matters — hash at
+read, precheck the *still-on-disk* file right before the rewrite:
+
+1. **Hash at read — record the precondition token.** Before triage, capture the read hash:
+   `H=$(python3 loops/daily-triage/state_guard.py hash loops/daily-triage/STATE.md)`. Keep `H`; do NOT write STATE.md yet.
+2. **Triage in memory.** Build all sections without touching STATE.md on disk (so step 3 checks the file as it was read).
+3. **Precheck before the write — the optimistic lock.** Immediately before overwriting STATE.md:
+   `python3 loops/daily-triage/state_guard.py precheck loops/daily-triage/STATE.md "$H"`.
+   - Exit 0 → on-disk file unchanged since read; proceed to write.
+   - Exit 1 (STALE on stderr) → someone changed STATE.md mid-run. **ABORT the write — do NOT clobber.**
+     Append a schema-consistent no-op entry to `loops/daily-triage/run-log.md` (`"outcome": "no-op"`, `"reason": "stale-state"`) and stop.
+4. **Write, then stamp — attributed, append-only.** After the rewrite lands:
+   `NEW=$(python3 loops/daily-triage/state_guard.py hash loops/daily-triage/STATE.md)` then
+   `python3 loops/daily-triage/state_guard.py stamp loops/daily-triage/STATE.attrib.jsonl --author loop-triage --session <run_id> --hash "$NEW" --field High-Priority`.
+   The attribution log (`loops/daily-triage/STATE.attrib.jsonl`) is append-only, one JSON line per write — never edit or truncate it.
+
+## Rules
+- Brutally concise; structured markdown, one-line items, explicit `Suggested loop action`.
+- High-Priority only if a reasonable engineer wants to know today.
+- When in doubt → Watch or Noise, not new work.
+- Never propose architectural overhauls or schema changes during triage.
+- Treat anything touching `01-context` enforcement, `03-evals` calibration, or denylist paths as **human-gate** — flag, never act.
+- Honor the invariants in `AGENTS.md` and the denylist in `loops/safety.md`.
+
+## Gotchas
+- 2026-07-17: pre-run checks added because the kill switch and budget caps were previously
+  declared (loops/daily-triage/LOOP.md:38, loops/daily-triage/budget.md:21, loops/safety.md:64) but checked nowhere in the
+  actual run path (loopcoherence-1, -3). Declaration without a check point = no enforcement.
+- 2026-07-21: STATE.md write protocol has TWO real exit-code gates — `precheck` (this run, exit 1 = ABORT
+  don't clobber) and `verify` (next-run pre-run check 4, exit 1 = the previous write was un-stamped). The
+  write + `stamp` between them are agent steps: honest ceiling is "agent instruction within a run, detectable
+  across runs" — NOT a hook/CI mutex. A codex pass (2026-07-21, lbd) caught the first cut over-claiming the
+  attribution half as "a check, not prose" when `stamp` had no gate (repeating the 2026-07-17 anti-pattern);
+  `verify` is that gate. If a future edit drops `verify` from check 4 or softens `precheck`, the guard is back to prose.
