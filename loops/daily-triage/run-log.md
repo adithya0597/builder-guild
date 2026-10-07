@@ -18,7 +18,8 @@ signal (e.g. the word "audit" in git history) is **not** a run and must not be r
   "escalations": 0,
   "tokens_estimate": 0,
   "outcome": "report-only | fix-proposed | escalated | no-op",
-  "reason": "<optional; only on aborted/early-exited runs: loop-pause-all | budget-exceeded>"
+  "reason": "<optional; only on aborted/early-exited runs: loop-pause-all | budget-exceeded>",
+  "sample_read": "<one line: which STATE item was sampled, what changed, and why it changed that way. Empty string = not done; an empty sample_read blocks promotion review. See LOOP.md 'Sample read'.>"
 }
 ```
 

@@ -1,0 +1,87 @@
+# Shared trigger surface for every loop under loops/.
+#
+# Declares BOTH trigger kinds the playbook accepts, because a timer alone misses the event
+# and an event alone misses the quiet week:
+#   - timer  : daily sweep, so a loop that nothing triggered still gets looked at
+#   - event  : a labelled issue, the same shape as Stripe's "@bot / emoji reaction"
+#   - dispatch: manual button. Present for convenience, NOT counted as a trigger by
+#              loop-rubric.py -- a button a human must remember to press is the Manual loop.
+#
+# What this workflow DOES today is run the loop-health gate. It does not execute the loops:
+# every loop under loops/ is L1 and is invoked manually as a skill (`/buildloop`, `/explore`,
+# ...). Wiring execution is an L2 decision and is deliberately not taken here.
+#
+# Inert until this file is on the default branch -- neither cron nor event triggers fire from
+# a feature branch. loop-rubric.py proves that and will report FAIL scheduling until it lands.
+
+name: loop-dispatch
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      loop:
+        description: 'Loop to report on (blank = all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: loop-dispatch
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    # Scheduler-side graceful pause: setting the LOOP_PAUSE_ALL repo variable stops every
+    # loop job from starting, without disabling the workflow or editing any file.
+    if: vars.LOOP_PAUSE_ALL != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # loop-rubric.py resolves origin/HEAD to prove triggers are live
+
+      - name: Grade every loop against the Loop Engineering rubric
+        run: |
+          set -euo pipefail
+          RUBRIC=".claude/skills/loop-engineer/loop-rubric.py"
+          if [ ! -f "$RUBRIC" ]; then
+            echo "::notice::loop-engineer not linked in this checkout; gate skipped"
+            exit 0
+          fi
+          python3 "$RUBRIC" --self-test
+          fail=0
+          for d in loops/*/; do
+            [ -f "$d/LOOP.md" ] || continue
+            echo "::group::$d"
+            python3 "$RUBRIC" "$d" || fail=1
+            echo "::endgroup::"
+          done
+          # Report-only for now. Flip to `exit $fail` once every loop's scheduling passes,
+          # so the gate blocks regressions instead of announcing them (spec S5).
+          echo "loop-health gate complete (report-only; fail=$fail)"
+
+      - name: Name which loop the event pointed at
+        if: github.event_name == 'issues'
+        # A label name is attacker-controllable by anyone who can label an issue. It is passed
+        # through env and quoted on use -- never interpolated into the shell, which would make
+        # `${{ }}` a command-injection sink. The case arms are literals, so an unknown label
+        # can only fall through to the default branch.
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          set -euo pipefail
+          case "$LABEL" in
+            build:ready) echo "due: loops/buildloop  — invoke /buildloop" ;;
+            build:codex) echo "due: loops/routeloop  — invoke /routeloop" ;;
+            route)       echo "due: loops/route      — invoke /route" ;;
+            research)    echo "due: loops/explore    — invoke /explore" ;;
+            *)           printf 'label %q maps to no loop; nothing due\n' "$LABEL" ;;
+          esac
+          echo "L1: the loop is reported as due. A human invokes the skill; this job does not."

@@ -12,7 +12,75 @@ eval/tooling truth fixes under `03-evals`, `tools/`, `01-context/setup_a2.sh`, a
 
 ## Current Progress
 
-**Session 2026-07-25/26 (environment only — toolchain + model lineup; NO repo work) — newest.**
+**Session 2026-07-27/28 (loop-engineering rubric + 5 loop scaffolds + 3 research audits) — newest.**
+
+**Verified end state.** `HEAD = origin/feat/loop-engineering-v3 = 0a107bc` — **nothing committed this
+session**. Working tree: 4 modified tracked files, 8 untracked paths (list under Key Files). Tracker:
+**199 total / 46 open / 153 closed**, `bd stats` reports **Issues Closed: 0** this session; **22 beads
+opened** (epic `builder-guild-9go6` + 21 children). Nothing pushed anywhere.
+
+### What was built
+
+- **`/loop-engineer`** — new skill (`SKILL.md` + `loop-rubric.py`), the *gate* for loops. Grades a
+  loop dir on 5 moves + 6 guards. Design point: **scheduling is proven with
+  `git cat-file -e origin/<default>:<path>`, not read from prose.** `--self-test` passes. Lives in
+  `morynt-harness/skills/loop-engineer/` (**PUBLIC repo, uncommitted `??`**) and mirrored to
+  `~/Projects/.claude/skills/`.
+- **`loop-engineering`** — 13-file reference skill distilled from the source PDF (SKILL.md + 9
+  chapters + glossary/patterns/cheatsheet). Deliberately **local-only** (`~/Projects/.claude/skills/`),
+  **not** in the public repo — it is a condensed derivative of a third-party document.
+- **`emit_loop.py` upgraded** (root-cause fix): template now emits Scheduling-locality, Evaluator-
+  behavior, Stop, and Sample-read sections plus a `sample_read` run-log field. Emitted loops now
+  score **6/6 guards out of the box**; previously 0 of those 4 existed.
+- **5 loop scaffolds emitted** — `loops/{buildloop,routeloop,route,explore,loop-miner}/`, plus
+  `.github/workflows/loop-dispatch.yml` (shared trigger surface: `schedule:` **and**
+  `issues: [labeled]`, with `workflow_dispatch` deliberately **not** counted as a trigger).
+- **3 research audits** in git-ignored `audits/`: `LOOP_ENGINEERING_SUPERIOR_SPEC.md`,
+  `GRAPH_ENGINEERING_PARADIGM.md`, `MORYNT_SYSTEMS_RESEARCH.md`.
+
+### Loop state — all 7 graded, both remaining FAILs are honest
+
+```
+buildloop / routeloop / route / explore / loop-miner   3/5 moves, 6/6 guards
+daily-triage                                           4/5 moves, 5/6 guards
+pre-ship-adversarial-review                            3/5 moves, 6/6 guards
+```
+Blocking: `persistence` (zero logged runs — true) and `scheduling` (`loop-dispatch.yml` /
+`loop-triage.yml` **not on `origin/main`**, so cron/event never fires — true). All 7 stay manually
+invocable as skills, which was the requested posture.
+
+### What Didn't Work / cost time
+
+- **`rtk` intercepts `find` and `grep`** in this sandbox: compound predicates error out, and a
+  `for i in $IDS; grep -q` loop returned a **false 0/18** on beads that were in fact all present.
+  Any "clean" result from those tools here needs a contradiction test before being believed.
+- **I broke `loop-rubric.py` twice with the identical error** — anchoring an `Edit` *after* a
+  docstring's closing `"""`, turning prose into bare code. Both times I `cp`'d to the public mirror
+  **before** testing, shipping a `SyntaxError`. Fixed ordering: `--self-test || exit 1` now gates the
+  copy.
+- **ResearchGate 403s all four papers**; `adtmag.com` and `blogs.oracle.com` hard-403 bot-block on
+  retry. Those two were left **unread**, not summarized from memory.
+- **One research subagent died mid-run** on an API stall and had to be relaunched with a tighter budget.
+
+### Findings a successor must not re-derive
+
+- **codex adversarial verdict (2026-07-28)**: the rubric measures *documentation*. 7 of 11 checks are
+  regex over `LOOP.md`. Verified live false-PASSes: `sample_read` passed on the run-log **schema
+  template** while no real entry carries the field; `classify.yml` (a PR path-classifier) would have
+  hijacked daily-triage's scheduling PASS on merge; `state_guard.py:106` returns 0 on bootstrap, so a
+  never-created attrib log verifies clean.
+- **`STATE.attrib.jsonl` has never existed.** `state_guard.py` implements it; the artifact is absent
+  from `loops/daily-triage/`. Any claim that we "exceed the doc on persistence" is unearned.
+- **The "just merge it" advice was wrong.** `builder-guild-006` records: *"DEFERRED per codex Option-4
+  verdict (2026-07-21): loop infra stays on branch."* A prior review already declined that merge.
+  What changed: **PR #23 is now MERGED**, clearing the deadlock `builder-guild-8pf` names — so it is
+  re-litigable, as a reopen of `006`/`8pf`, not as new work.
+- **Research provenance (see `audits/MORYNT_SYSTEMS_RESEARCH.md`)**: **LEAF** is unverifiable (no
+  author/DOI/venue found); **CAR** is an unadopted MDPI preprint; the "order of magnitude cost
+  collapse" is contradicted by its own paper (~60%, self-labeled directional, SCIRP venue). **MAST**
+  (arXiv:2503.13657) and **IAL-Scan** (arXiv:2607.01641) are real and verified twice.
+
+**Session 2026-07-25/26 (environment only — toolchain + model lineup; NO repo work).**
 Branch untouched: HEAD = origin = `d890aff`, 0 porcelain, zero beads opened/closed. Everything below
 is host/harness state a successor needs, not branch state.
 - **Claude Code updated**: native install `~/.local/bin/claude` 2.1.219 → **2.1.220** (`claude update`
@@ -204,21 +272,96 @@ in the loop-engineering repo's own templates:
 the words "triage"/"last run" found in `STATE.md` prose — a known false positive. The run log holds
 only those honest entries so the heuristic isn't laundered into an L3 claim. **It is genuinely L1.**
 
-## What Worked
+## Next Steps — 2026-07-28 (CURRENT)
+
+1. **`/pre-push-disclosure-scan` on `morynt-harness` before any commit** — it is a PUBLIC repo with
+   `?? skills/loop-engineer/` and a modified `emit_loop.py` pending. The SKILL.md cites Builder
+   Guild's `loop-triage.yml` / `origin/main` state as a gotcha; confirm that reads boundary-matching.
+2. **Founder call on `builder-guild-o1a5`** — `loop-dispatch.yml` is notify-only today. If it stays
+   notify-only, **no loop can ever reach LIVE by design**; record that as intent rather than reporting
+   it as a gap. This decision gates `inp7`.
+3. **Ship `builder-guild-vlqk`** (step-count invariant + repeat-tool-call hashing). Highest-
+   corroborated gap in the entire research corpus: **100% of IAL-Scan's 68 confirmed real-world
+   infinite-loop failures share "missing strong bound."** Our loops have neither.
+4. **Fix `builder-guild-jhac`** — the 5 emitted loops carry a weaker kill switch than pre-ship
+   (0 occurrences of anchored `^PAUSE: loop-pause-all$` vs 1). Fix the `emit_loop.py` template first,
+   then re-emit or patch. This is a live security regression, not a metrics gap.
+5. **Then the rubric-truth beads** — `m40p` (sample_read counts entries), `fjf5` (verification reads
+   verifier evidence), `uh16` (SPEC/ARMED/LIVE lifecycle). Expect guard scores to **drop** from 6/6 to
+   ~1–2/6 across all 7 loops. That is the correct outcome: today's 6/6 is a documentation score.
+6. **Re-open `builder-guild-006` / `8pf`** now that PR #23 is merged, or record why the 2026-07-21
+   deferral still stands.
+7. **Explain `?? .agents/` and `?? .codex/`** (`builder-guild-p2hg`) before staging anything — they
+   are unaccounted-for untracked dirs in a repo whose disclosure posture depends on knowing the push
+   surface.
+
+## Open Questions — 2026-07-28 (CURRENT)
+
+- Does `loop-dispatch.yml` execute loops, or only report them due? (blocks `inp7`, `jidi`)
+- Do the 5 scaffolded loops get retro-gated through `loopminer-gate.py`, or marked SPEC-UNEARNED?
+  They bypassed the evidence gate — our own stated advantage (`rlii`).
+- Is the `feat/loop-engineering-v3` → `main` merge back on the table post-PR-#23?
+- Should the `loop-engineering` reference skill stay local-only, or is a licensed/attributed public
+  version wanted?
+
+## Key Files Modified — 2026-07-28 (CURRENT)
+
+**medan (this repo) — 4 modified, 8 untracked, nothing committed:**
+- `loops/daily-triage/{LOOP.md,run-log.md}` — +Scheduling locality, +Stop, +Sample read; `sample_read`
+  field added to run-log schema
+- `loops/pre-ship-adversarial-review/{LOOP.md,run-log.md}` — same four sections + workflow declaration
+- `loops/{buildloop,routeloop,route,explore,loop-miner}/` — **new**, 5 emitted scaffolds
+- `.github/workflows/loop-dispatch.yml` — **new**, timer+event trigger surface; label interpolation is
+  passed via `env:` and quoted (a security hook caught the injection sink and it was fixed)
+- `audits/{LOOP_ENGINEERING_SUPERIOR_SPEC,GRAPH_ENGINEERING_PARADIGM,MORYNT_SYSTEMS_RESEARCH}.md` —
+  **new**, git-ignored
+- `.agents/`, `.codex/` — untracked, **origin unexplained** (`p2hg`)
+
+**Outside this repo:**
+- `morynt-harness/skills/loop-engineer/` — **new, PUBLIC repo, uncommitted**
+- `morynt-harness/skills/loop-miner/emit_loop.py` — modified (template upgrade), **PUBLIC**
+- `~/Projects/.claude/skills/loop-engineer/`, `~/Projects/.claude/skills/loop-engineering/` — mirrors
+- `~/Projects/.claude/scripts/link-harness.sh` — `ln -sfn` nested a symlink *inside* a real dir;
+  now falls back to per-item merge. Not a git repo, nothing to commit.
+- **2nd-brain-v2/reykjavik** (separate repo): `.claude/rules` repaired (was missing 4 shared rules via
+  the same nesting bug), 3 local rule forks `git rm`'d (**staged, uncommitted**), `CLAUDE.md` gained a
+  project-specific Verification section.
+
+## Tracker Delta (live `bd stats` / `bd show` at write time, 2026-07-28)
+
+**Live counts:** 199 total · **46 open** · 153 closed · 36 ready · 10 blocked. `bd stats` reports
+**Issues Closed: 0** this session.
+
+**OPENED (22)** — epic `builder-guild-9go6` *"EPIC loop-rubric behavioral truth: replace prose-
+satisfiable guards with run-derived evidence (codex adversarial verdict 2026-07-28)"* + 21 children:
+
+| P | Beads |
+|---|---|
+| **P1 (8)** | `vlqk` step-bound · `o1a5` dispatch execute-vs-notify · `inp7` scheduling proves execution · `m40p` sample_read counts entries · `fjf5` verification reads evidence · `uh16` SPEC/ARMED/LIVE · `jhac` kill-switch regression · `rlii` miner-gate bypass |
+| **P2 (8)** | `rjdl` token-cap trip path · `hgvq` state_guard bootstrap · `4cx9` remaining prose guards · `bwx3` heartbeat 1→7 · `7n00` promotion needs a REJECT · `dqy5` Tier-4 hill-climbing · `jidi` gate report-only→blocking · `yosw` counter-metric anchoring |
+| **P3 (5)** | `pvoj` run-log hygiene · `y86p` spec re-scope · `6fc1` verdicts→ledger · `8f2k` connectors uncovered · `p2hg` unexplained untracked dirs |
+
+**CLOSED (0).** No bead was closed this session.
+
+**Pre-existing beads that became relevant:** `builder-guild-006` (post-merge scheduler proof — carries
+the 2026-07-21 deferral), `8pf` (ruleset apply — PR #23 blocker now cleared), `bgo` (Anthropic spend
+cap — overlaps `rjdl`), `tic` (the older loop-operationalization epic, 8 of 10 children closed).
+
+## What Worked — 2026-07-23 (superseded)
 
 - Grounding every artifact in the loop-engineering repo's actual templates — names match what
   `loop-audit` detects (`loop-triage`, `loop-verifier`, `STATE.md`, `LOOP.md`, …).
 - Branching from `main` (clean, independently mergeable) rather than from the docs branch.
 - Keeping `loops/daily-triage/run-log.md` limited to real entries + the `LOOP.md` maturity note honest about L1-vs-L3.
 
-## What Didn't Work / Avoid
+## What Didn't Work / Avoid — 2026-07-23 (superseded)
 
 - Do NOT seed `loops/daily-triage/run-log.md` with fake entries to reach L3 — that is the framework's own
   anti-pattern ("L3 before L1 quality") and defeats the purpose.
 - Do NOT let the triage loop touch `01-context` enforcement or `03-evals` calibration — human-gate
   only (see `loops/safety.md`).
 
-## Next Steps
+## Next Steps — 2026-07-23 (superseded)
 
 0. ~~MERGE PR #23~~ **DONE 2026-07-21 (founder-authorized): merged `--squash --admin` after all
    checks green (graph 3m57s). Merge commit = main tip = `37aade5`; verified the publish_gate
@@ -270,13 +413,13 @@ only those honest entries so the heuristic isn't laundered into an L3 claim. **I
    moves Builder Guild's canonical loop-audit score off the `main` floor.
 5. (Optional) Remove this `HANDOFF.md` before merging to `main`.
 
-## Open Questions
+## Open Questions — 2026-07-23 (superseded)
 
 - ~~Keep the loop scaffolding at repo root, or relocate?~~ **RESOLVED 2026-07-20: relocated under `loops/`** — per-loop folder `loops/daily-triage/{LOOP,STATE,run-log,budget}.md` + shared `loops/safety.md`; skills/agents stay under `.claude/` (harness discovery).
 - Once `.claude/` is repo-owned, do you still want the monorepo `~/.claude` harness in worktrees (it
   travels via the global layer anyway), or fully retire the symlink?
 
-## Key Files Modified
+## Key Files Modified — 2026-07-23 (superseded)
 
 This branch only; `main` and `docs/reconcile-roadmap-calibration` untouched. Added (loop scaffolding; relocated 2026-07-20 into `loops/`):
 `loops/daily-triage/{LOOP.md,STATE.md,run-log.md,budget.md}`, `loops/safety.md`, `loops/README.md`, `AGENTS.md`,

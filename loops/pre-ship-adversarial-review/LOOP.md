@@ -58,6 +58,49 @@ grep -q "\"run_id\": \"$(date -u +%Y-%m-%d)" loops/pre-ship-adversarial-review/r
 
 Done = STATE sections rewritten AND one run-log entry appended for today (UTC).
 
+## Scheduling locality (local vs cloud)
+
+Recorded deliberately, because a loop believed autonomous that silently stops when a laptop lid
+closes is the common way this decision goes wrong.
+
+- **Workflow: `.github/workflows/loop-dispatch.yml`** — the shared trigger surface, carrying both
+  a daily `schedule:` and an `issues: [labeled]` listener. `workflow_dispatch` is present for
+  manual runs but is not counted as a trigger: a button someone must remember to press is the
+  Manual loop with extra steps.
+- **Choice: cloud** (GitHub Actions `schedule:`), pending S2. This loop reads commits, PRs, and
+  review trails — none of which is glued to the local machine — so tying it to a laptop would buy
+  nothing and cost availability.
+- **Cost accepted:** a one-hour minimum interval and a clean clone each run. Both are irrelevant
+  here: the cadence is daily, and the loop needs no local state.
+- **Not local `/loop`:** that would require the machine on and a session open, which defeats the
+  point of a pre-ship gate that must fire whether or not anyone is working.
+- **Live only when its workflow is on the default branch** — cron does not fire from a feature
+  branch. Until then this loop is manual, and the rubric reports it as such.
+
+## Stop (the boundary this loop cannot infer)
+
+- **Never dispatch a review.** This loop reports that an adversarial verdict is missing; it does
+  not run one. Escalation is a separate human-gated decision.
+- **Never merge, never close, never push.** It has no write path to any shipping surface.
+- **Never write outside** its own `STATE.md` and `run-log.md`.
+- **Never treat absence of evidence as a pass** — a diff with no recorded verdict is reported as
+  missing a verdict, never as having been reviewed.
+- **On in-band pause, abort and log the no-op** rather than continuing in a reduced mode.
+
+## Sample read (comprehension-rot guard)
+
+- Each run, the operator reads **one** flagged diff and records a one-line explanation of what it
+  changed and why, in the run-log entry's `sample_read` field.
+- Inability to explain a sampled diff means the map is behind the codebase — the signal this guard
+  exists to surface.
+- A filled `sample_read` is a precondition for any promotion review.
+
+## Evaluator behavior
+
+The done-condition below is **executed**, not read: the `grep` runs against the run-log and its
+exit status decides the verdict. A checker that only reads judges "does this look right"; one that
+runs judges "does it hold". Findings cite the command output.
+
 ## Maturity
 
 Operational level: **L1 report-only**. It detects and reports missing recorded verdicts. Any
